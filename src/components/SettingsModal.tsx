@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { generateStampText, getSymbolText, createStampImage } from '../utils/stampUtils';
-import type { StampFormat, FileNameNumberFormat, FileNameJoinFormat, StampColor } from '../types';
+import type { StampFormat, FileNameNumberFormat, FileNameJoinFormat, StampColor, PageNumberFormat, PageNumberPosition } from '../types';
 
 interface Props {
   onClose: () => void;
@@ -217,6 +217,91 @@ export default function SettingsModal({ onClose }: Props) {
                   />
                 </div>
               )}
+            </div>
+          </section>
+
+          <hr />
+
+          {/* ── ページ番号 ── */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-gray-700">ページ番号</h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={settings.pageNumberEnabled}
+                  onChange={(e) => updateSettings({ pageNumberEnabled: e.target.checked })}
+                  className="accent-blue-600 w-4 h-4"
+                />
+                <span className="text-sm text-gray-600">有効にする</span>
+              </label>
+            </div>
+
+            <div className={`space-y-4 transition-opacity ${settings.pageNumberEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+              {/* 番号形式 */}
+              <div>
+                <p className="text-xs text-gray-500 mb-2">番号形式</p>
+                {([
+                  { value: 'n', label: '1, 2, 3 …' },
+                  { value: 'n/total', label: '1/3, 2/3, 3/3 …' },
+                  { value: 'dash-n-dash', label: '- 1 -, - 2 -, - 3 - …' },
+                ] as { value: PageNumberFormat; label: string }[]).map((f) => (
+                  <label key={f.value} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer mb-1 ${settings.pageNumberFormat === f.value ? 'bg-blue-50 border border-blue-300' : 'hover:bg-gray-50'}`}>
+                    <input type="radio" name="pageNumFormat" value={f.value}
+                      checked={settings.pageNumberFormat === f.value}
+                      onChange={() => updateSettings({ pageNumberFormat: f.value })}
+                      className="accent-blue-600"
+                    />
+                    <span className="text-sm">{f.label}</span>
+                  </label>
+                ))}
+              </div>
+
+              {/* 位置 */}
+              <div>
+                <p className="text-xs text-gray-500 mb-2">位置</p>
+                {([
+                  { value: 'bottom-center', label: '下中央' },
+                  { value: 'bottom-right',  label: '下右' },
+                  { value: 'bottom-left',   label: '下左' },
+                ] as { value: PageNumberPosition; label: string }[]).map((p) => (
+                  <label key={p.value} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer mb-1 ${settings.pageNumberPosition === p.value ? 'bg-blue-50 border border-blue-300' : 'hover:bg-gray-50'}`}>
+                    <input type="radio" name="pageNumPos" value={p.value}
+                      checked={settings.pageNumberPosition === p.value}
+                      onChange={() => updateSettings({ pageNumberPosition: p.value })}
+                      className="accent-blue-600"
+                    />
+                    <span className="text-sm">{p.label}</span>
+                  </label>
+                ))}
+              </div>
+
+              {/* フォントサイズ */}
+              <div>
+                <p className="text-xs text-gray-500 mb-1">フォントサイズ: <strong>{settings.pageNumberFontSize}pt</strong></p>
+                <input type="range" min={8} max={16} value={settings.pageNumberFontSize}
+                  onChange={(e) => updateSettings({ pageNumberFontSize: Number(e.target.value) })}
+                  className="w-full accent-blue-600"
+                />
+              </div>
+
+              {/* 色 */}
+              <div>
+                <p className="text-xs text-gray-500 mb-2">色</p>
+                <div className="flex gap-2">
+                  {(['red', 'blue', 'black'] as StampColor[]).map((c) => {
+                    const label = c === 'red' ? '赤' : c === 'blue' ? '青' : '黒';
+                    const active = settings.pageNumberColor === c;
+                    const cls = c === 'red' ? 'bg-red-100 border-red-500 text-red-700'
+                      : c === 'blue' ? 'bg-blue-100 border-blue-500 text-blue-700'
+                      : 'bg-gray-100 border-gray-600 text-gray-700';
+                    return (
+                      <button key={c}
+                        onClick={() => updateSettings({ pageNumberColor: c })}
+                        className={`px-4 py-1.5 rounded-full border-2 text-sm font-medium transition-all ${active ? cls : 'bg-white border-gray-300 text-gray-500'}`}
+                      >{label}</button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </section>
 

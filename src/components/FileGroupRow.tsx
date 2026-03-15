@@ -14,7 +14,7 @@ interface Props {
 }
 
 export default function FileGroupRow({ group, index, settings, isFirst, isLast }: Props) {
-  const { removeGroup, removeBranch, makeBranch, makeMain, moveGroupUp, moveGroupDown } = useStore();
+  const { removeGroup, removeBranch, makeBranch, makeMain, moveGroupUp, moveGroupDown, setCustomOutputName, setCustomStampPosition } = useStore();
 
   const {
     attributes, listeners, setNodeRef,
@@ -24,10 +24,11 @@ export default function FileGroupRow({ group, index, settings, isFirst, isLast }
   const sym = getSymbolText(settings.symbol, settings.customSymbol);
   const mainNum = settings.startNumber + index;
   const hasBranches = group.branchFiles.length > 0;
+  const nl = settings.numberless;
 
-  const mainLabel = generateStampText(sym, mainNum, hasBranches ? 1 : null, settings.stampFormat);
+  const mainLabel = generateStampText(sym, mainNum, hasBranches ? 1 : null, settings.stampFormat, nl);
   const branchLabels = group.branchFiles.map((_, j) =>
-    generateStampText(sym, mainNum, j + 2, settings.stampFormat),
+    generateStampText(sym, mainNum, j + 2, settings.stampFormat, nl),
   );
 
   const style: React.CSSProperties = {
@@ -53,9 +54,8 @@ export default function FileGroupRow({ group, index, settings, isFirst, isLast }
           ⠿
         </div>
         <div className="w-10 h-10 rounded-full bg-white border-2 border-gray-300 flex items-center justify-center text-sm font-bold text-gray-700">
-          {mainNum}
+          {nl ? sym : mainNum}
         </div>
-        {/* 上下ボタン */}
         <div className="flex gap-0.5">
           <button
             onClick={() => moveGroupUp(group.id)}
@@ -79,24 +79,34 @@ export default function FileGroupRow({ group, index, settings, isFirst, isLast }
 
       {/* ファイルカード群（横並び） */}
       <div className="flex flex-wrap gap-2 flex-1">
-        {/* メインファイル */}
         <FileCard
           label={mainLabel}
-          fileName={group.mainFile.file.name}
+          file={group.mainFile.file}
+          customOutputName={group.mainFile.customOutputName}
+          customStampPosition={group.mainFile.customStampPosition}
           isBranch={false}
+          settings={settings}
           onRemove={() => removeGroup(group.id)}
           onMakeBranch={!isFirst ? () => makeBranch(group.id) : undefined}
+          onRenameOutput={(name) => setCustomOutputName(group.id, group.mainFile.id, name)}
+          onSavePosition={(pos) => setCustomStampPosition(group.id, group.mainFile.id, pos)}
+          onResetPosition={() => setCustomStampPosition(group.id, group.mainFile.id, undefined)}
         />
 
-        {/* 枝番ファイル */}
         {group.branchFiles.map((entry, j) => (
           <FileCard
             key={entry.id}
             label={branchLabels[j]}
-            fileName={entry.file.name}
+            file={entry.file}
+            customOutputName={entry.customOutputName}
+            customStampPosition={entry.customStampPosition}
             isBranch={true}
+            settings={settings}
             onRemove={() => removeBranch(group.id, entry.id)}
             onMakeMain={() => makeMain(group.id, entry.id)}
+            onRenameOutput={(name) => setCustomOutputName(group.id, entry.id, name)}
+            onSavePosition={(pos) => setCustomStampPosition(group.id, entry.id, pos)}
+            onResetPosition={() => setCustomStampPosition(group.id, entry.id, undefined)}
           />
         ))}
       </div>

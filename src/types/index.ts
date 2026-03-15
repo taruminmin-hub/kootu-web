@@ -28,9 +28,20 @@ export type FileNameJoinFormat =
 
 export type StampColor = 'red' | 'blue' | 'black';
 
+export interface StampPosition {
+  /** PDF 右端からの距離 (pt) */
+  marginRight: number;
+  /** PDF 上端からの距離 (pt) */
+  marginTop: number;
+}
+
 export interface FileEntry {
   id: string;
   file: File;
+  /** ユーザーが設定したカスタム出力ファイル名（拡張子なし）。未設定は undefined */
+  customOutputName?: string;
+  /** ファイルごとのスタンプ位置上書き。未設定はグローバル設定を使用 */
+  customStampPosition?: StampPosition;
 }
 
 export interface FileGroup {
@@ -39,10 +50,19 @@ export interface FileGroup {
   branchFiles: FileEntry[];
 }
 
+export type PageNumberFormat = 'n' | 'n/total' | 'dash-n-dash';
+// n         : 1, 2, 3
+// n/total   : 1/3, 2/3
+// dash-n-dash : - 1 -, - 2 -
+
+export type PageNumberPosition = 'bottom-center' | 'bottom-right' | 'bottom-left';
+
 export interface Settings {
   symbol: SymbolType;
   customSymbol: string;
   startNumber: number;
+  /** true のとき番号を付けず符号のみをスタンプする */
+  numberless: boolean;
 
   // PDF スタンプ設定
   stampFormat: StampFormat;
@@ -52,6 +72,13 @@ export interface Settings {
   marginRight: number;
   whiteBackground: boolean;
   border: boolean;
+
+  // ページ番号設定
+  pageNumberEnabled: boolean;
+  pageNumberFormat: PageNumberFormat;
+  pageNumberPosition: PageNumberPosition;
+  pageNumberFontSize: number;
+  pageNumberColor: StampColor;
 
   // ファイル名設定
   fileNameNumberFormat: FileNameNumberFormat;

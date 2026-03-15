@@ -7,6 +7,7 @@ import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useStore } from './store/useStore';
 import { processAllFiles, downloadAsZip } from './utils/pdfProcessor';
+import { imageToPdf, isImageFile, isPdfFile } from './utils/imageConverter';
 import FileGroupRow from './components/FileGroupRow';
 import DropZone from './components/DropZone';
 import SettingsModal from './components/SettingsModal';
@@ -37,6 +38,7 @@ export default function App() {
   const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [converting, setConverting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
 
@@ -59,17 +61,42 @@ export default function App() {
     if (over && active.id !== over.id) reorderGroups(String(active.id), String(over.id));
   };
 
+  /** PDF・画像ファイルを受け取り、画像は PDF に変換してからリストに追加する */
+  const handleAddFiles = useCallback(async (rawFiles: File[]) => {
+    setError(null);
+    const acceptable = rawFiles.filter((f) => isPdfFile(f) || isImageFile(f));
+    if (!acceptable.length) return;
+
+    const images = acceptable.filter(isImageFile);
+    const pdfs = acceptable.filter(isPdfFile);
+
+    if (images.length > 0) {
+      setConverting(true);
+      try {
+        const converted = await Promise.all(images.map(imageToPdf));
+        addFiles([...pdfs, ...converted]);
+      } catch (err) {
+        setError(err instanceof Error ? `画像変換失敗: ${err.message}` : '画像変換中にエラーが発生しました');
+        if (pdfs.length) addFiles(pdfs);
+      } finally {
+        setConverting(false);
+      }
+    } else {
+      addFiles(pdfs);
+    }
+  }, [addFiles]);
+
   const openFilePicker = useCallback(() => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.pdf,application/pdf';
+    input.accept = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*';
     input.multiple = true;
     input.onchange = (e) => {
       const files = Array.from((e.target as HTMLInputElement).files ?? []);
-      if (files.length) addFiles(files);
+      if (files.length) handleAddFiles(files);
     };
     input.click();
-  }, [addFiles]);
+  }, [handleAddFiles]);
 
   const handleProcess = async () => {
     if (!groups.length) return;
@@ -92,7 +119,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* ── ヘッダー ── */}
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-6 shadow-sm">
-        <h1 className="text-base font-bold text-gray-800 shrink-0">甲乙つけるくん Web版</h1>
+        <h1 className="text-base font-bold text-gray-800 shrink-0">証拠番号付与アプリ</h1>
 
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
@@ -117,7 +144,7 @@ export default function App() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-2 transition-opacity ${settings.numberless ? 'opacity-40 pointer-events-none' : ''}`}>
             <label className="text-sm text-gray-600 shrink-0">開始番号:</label>
             <input
               type="number"
@@ -127,6 +154,17 @@ export default function App() {
               className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center"
             />
           </div>
+
+          {/* 番号なしオプション */}
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.numberless}
+              onChange={(e) => updateSettings({ numberless: e.target.checked })}
+              className="accent-blue-600 w-4 h-4"
+            />
+            <span className="text-sm text-gray-600">番号なし</span>
+          </label>
         </div>
 
         <div className="ml-auto shrink-0">
@@ -188,7 +226,7 @@ export default function App() {
         {/* ── メインエリア ── */}
         <main className="flex-1 p-4 overflow-y-auto">
           {groups.length === 0 ? (
-            <DropZone onDrop={addFiles} />
+            <DropZone onDrop={handleAddFiles} />
           ) : (
             <>
               <DndContext
@@ -215,7 +253,7 @@ export default function App() {
                 </SortableContext>
               </DndContext>
               <div className="mt-3">
-                <DropZone onDrop={addFiles} compact />
+                <DropZone onDrop={handleAddFiles} compact />
               </div>
             </>
           )}
@@ -224,6 +262,14 @@ export default function App() {
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {processing && <ProcessingOverlay current={progress.current} total={progress.total} />}
+      {converting && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 flex items-center gap-4">
+            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+            <p className="text-sm font-medium text-gray-700">画像を PDF に変換中…</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

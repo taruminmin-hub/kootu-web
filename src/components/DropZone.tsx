@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { isPdfFile, isImageFile } from '../utils/imageConverter';
 
 interface Props {
   onDrop: (files: File[]) => void;
@@ -19,8 +20,8 @@ export default function DropZone({ onDrop, compact }: Props) {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
-      const files = Array.from(e.dataTransfer.files).filter((f) =>
-        f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
+      const files = Array.from(e.dataTransfer.files).filter(
+        (f) => isPdfFile(f) || isImageFile(f),
       );
       if (files.length > 0) onDrop(files);
     },
@@ -37,7 +38,7 @@ export default function DropZone({ onDrop, compact }: Props) {
           dragging ? 'border-blue-400 bg-blue-50 text-blue-500' : 'border-gray-300'
         }`}
       >
-        ここにPDFをドラッグ＆ドロップして追加
+        PDF・画像（JPEG/PNG/HEIC）をドラッグ＆ドロップして追加
       </div>
     );
   }
@@ -52,8 +53,9 @@ export default function DropZone({ onDrop, compact }: Props) {
       }`}
     >
       <div className="text-5xl mb-3 text-gray-300">⬆</div>
-      <p className="text-gray-500 font-medium">PDFファイルをここにドラッグ＆ドロップ</p>
-      <p className="text-gray-400 text-sm mt-1">または左側の「ファイル追加」ボタンから選択</p>
+      <p className="text-gray-500 font-medium">ファイルをここにドラッグ＆ドロップ</p>
+      <p className="text-gray-400 text-sm mt-1">PDF / JPEG / PNG / HEIC に対応</p>
+      <p className="text-gray-400 text-sm">または左側の「ファイル追加」ボタンから選択</p>
     </div>
   );
 }

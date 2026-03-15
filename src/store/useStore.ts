@@ -1,10 +1,11 @@
 import { create } from 'zustand';
-import type { FileGroup, FileEntry, Settings } from '../types';
+import type { FileGroup, FileEntry, Settings, StampPosition } from '../types';
 
 const defaultSettings: Settings = {
   symbol: '甲',
   customSymbol: '',
   startNumber: 1,
+  numberless: false,
   stampFormat: 'full-cert',
   fontSize: 14,
   color: 'red',
@@ -12,6 +13,11 @@ const defaultSettings: Settings = {
   marginRight: 20,
   whiteBackground: false,
   border: false,
+  pageNumberEnabled: false,
+  pageNumberFormat: 'n',
+  pageNumberPosition: 'bottom-center',
+  pageNumberFontSize: 10,
+  pageNumberColor: 'black',
   fileNameNumberFormat: 'zero-padded',
   fileNameJoinFormat: 'space',
   customFileNameFormat: '{stamp} {name}.pdf',
@@ -31,12 +37,14 @@ interface AppState {
   removeBranch: (groupId: string, fileId: string) => void;
   moveGroupUp: (groupId: string) => void;
   moveGroupDown: (groupId: string) => void;
-  /** 現在のグループを直前のグループの枝番にする */
   makeBranch: (groupId: string) => void;
-  /** 枝番ファイルを独立したグループにする */
   makeMain: (groupId: string, fileId: string) => void;
   reorderGroups: (activeId: string, overId: string) => void;
   updateSettings: (partial: Partial<Settings>) => void;
+  /** ファイルのカスタム出力名を設定する */
+  setCustomOutputName: (groupId: string, fileId: string, name: string) => void;
+  /** ファイルのスタンプ位置を個別に設定する */
+  setCustomStampPosition: (groupId: string, fileId: string, pos: StampPosition | undefined) => void;
   clearAll: () => void;
 }
 
@@ -133,6 +141,38 @@ export const useStore = create<AppState>((set) => ({
 
   updateSettings: (partial) =>
     set((s) => ({ settings: { ...s.settings, ...partial } })),
+
+  setCustomOutputName: (groupId, fileId, name) =>
+    set((s) => ({
+      groups: s.groups.map((g) => {
+        if (g.id !== groupId) return g;
+        if (g.mainFile.id === fileId) {
+          return { ...g, mainFile: { ...g.mainFile, customOutputName: name } };
+        }
+        return {
+          ...g,
+          branchFiles: g.branchFiles.map((f) =>
+            f.id === fileId ? { ...f, customOutputName: name } : f,
+          ),
+        };
+      }),
+    })),
+
+  setCustomStampPosition: (groupId, fileId, pos) =>
+    set((s) => ({
+      groups: s.groups.map((g) => {
+        if (g.id !== groupId) return g;
+        if (g.mainFile.id === fileId) {
+          return { ...g, mainFile: { ...g.mainFile, customStampPosition: pos } };
+        }
+        return {
+          ...g,
+          branchFiles: g.branchFiles.map((f) =>
+            f.id === fileId ? { ...f, customStampPosition: pos } : f,
+          ),
+        };
+      }),
+    })),
 
   clearAll: () => set({ groups: [] }),
 }));

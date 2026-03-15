@@ -9,13 +9,16 @@ export function getSymbolText(symbol: string, customSymbol: string): string {
 /**
  * スタンプ用テキストを生成する
  * @param branchNum null=枝番なし, 1=枝番グループの主番, 2以上=枝番
+ * @param numberless true のとき符号のみ（番号なし）で返す
  */
 export function generateStampText(
   symbolText: string,
   mainNum: number,
   branchNum: number | null,
   format: StampFormat,
+  numberless = false,
 ): string {
+  if (numberless) return symbolText;
   if (symbolText === '別紙') {
     return branchNum === null ? `別紙${mainNum}` : `別紙${mainNum}-${branchNum}`;
   }
@@ -37,13 +40,16 @@ export function generateStampText(
 
 /**
  * ファイル名用番号テキストを生成する
+ * @param numberless true のとき符号のみ
  */
 export function generateFileNameNumber(
   symbolText: string,
   mainNum: number,
   branchNum: number | null,
   format: FileNameNumberFormat,
+  numberless = false,
 ): string {
+  if (numberless) return symbolText;
   if (symbolText === '別紙') {
     return branchNum === null ? `別紙${mainNum}` : `別紙${mainNum}-${branchNum}`;
   }
