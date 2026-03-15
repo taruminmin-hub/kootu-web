@@ -43,6 +43,9 @@ export default function StampPositionModal({
   // スタンプ画像の px サイズ
   const [stampPx, setStampPx] = useState({ w: 60, h: 20 });
 
+  // スタンプ画像のプレビュー URL
+  const [stampImageUrl, setStampImageUrl] = useState<string | null>(null);
+
   const scale = canvasSize.w > 0 ? canvasSize.w / pdfSize.w : 1;
 
   // PDF を Canvas に描画（回転対応）
@@ -110,20 +113,29 @@ export default function StampPositionModal({
     return () => { cancelled = true; };
   }, [file, rotation]);
 
-  // スタンプ画像サイズ計算（ローカル設定を使用）
+  // スタンプ画像サイズ計算 + プレビュー生成（ローカル設定を使用）
   useEffect(() => {
+    let cancelled = false;
+    let prevUrl: string | null = null;
     createStampImage(stampLabel, localFontSize, localColor, localWhiteBg, localBorder)
       .then((bytes) => {
+        if (cancelled) return;
         const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'image/png' });
-        const img = new Image();
         const url = URL.createObjectURL(blob);
+        prevUrl = url;
+        const img = new Image();
         img.onload = () => {
+          if (cancelled) { URL.revokeObjectURL(url); return; }
           setStampPx({ w: img.width / 3, h: img.height / 3 });
-          URL.revokeObjectURL(url);
+          setStampImageUrl(url);
         };
         img.src = url;
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
+    };
   }, [stampLabel, localFontSize, localColor, localWhiteBg, localBorder, scale]);
 
   // ドラッグ処理
@@ -202,20 +214,18 @@ export default function StampPositionModal({
             onMouseDown={handleMouseDown}
           >
             <canvas ref={canvasRef} className="block" />
-            {canvasSize.w > 0 && (
-              <div
-                className="absolute border-2 border-red-500 bg-red-50/60 flex items-center justify-center pointer-events-none"
+            {canvasSize.w > 0 && stampImageUrl && (
+              <img
+                src={stampImageUrl}
+                alt={stampLabel}
+                className="absolute pointer-events-none"
                 style={{
                   left: stampLeft,
                   top: stampTop,
                   width: stampPx.w * scale,
                   height: stampPx.h * scale,
                 }}
-              >
-                <span className="text-red-600 font-bold text-[9px] whitespace-nowrap overflow-hidden">
-                  {stampLabel}
-                </span>
-              </div>
+              />
             )}
           </div>
         </div>
