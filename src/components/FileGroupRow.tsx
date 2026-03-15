@@ -1,5 +1,5 @@
 import React from 'react';
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, useDroppable } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -17,6 +17,7 @@ interface Props {
   selectionMode: boolean;
   selectedIds: Set<string>;
   onToggleSelect: (fileId: string) => void;
+  draggingGroupId?: string | null;
 }
 
 /** 枝番ファイルをドラッグで並び替えるためのラッパー */
@@ -48,6 +49,7 @@ function SortableBranchItem({ id, children }: { id: string; children: React.Reac
 export default function FileGroupRow({
   group, index, settings, isFirst, isLast,
   selectionMode, selectedIds, onToggleSelect,
+  draggingGroupId,
 }: Props) {
   const {
     removeGroup, removeBranch, makeBranch, makeMain,
@@ -60,6 +62,10 @@ export default function FileGroupRow({
     attributes, listeners, setNodeRef,
     transform, transition, isDragging,
   } = useSortable({ id: group.id });
+
+  const dropId = `branch-drop-${group.id}`;
+  const isDraggingOther = !!draggingGroupId && draggingGroupId !== group.id;
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: dropId, disabled: !isDraggingOther });
 
   const branchSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -93,8 +99,27 @@ export default function FileGroupRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-start gap-3"
+      className={`relative bg-gray-50 border rounded-xl p-3 flex items-start gap-3 transition-colors ${
+        isOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200'
+      }`}
     >
+      {/* 枝番ドロップゾーン（別グループをドラッグ中のみ表示） */}
+      {isDraggingOther && (
+        <div
+          ref={setDropRef}
+          className={`absolute inset-0 rounded-xl z-10 flex items-center justify-center pointer-events-auto transition-colors ${
+            isOver
+              ? 'bg-blue-100/80 border-2 border-blue-500'
+              : 'bg-transparent border-2 border-dashed border-blue-300'
+          }`}
+        >
+          {isOver && (
+            <span className="text-blue-700 font-bold text-sm bg-white/90 px-3 py-1 rounded-full shadow">
+              枝番として追加
+            </span>
+          )}
+        </div>
+      )}
       {/* ドラッグハンドル＋番号バッジ */}
       <div className="flex flex-col items-center gap-1 shrink-0 w-14">
         <div

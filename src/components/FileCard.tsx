@@ -203,9 +203,9 @@ export default function FileCard({
                   ? 'text-orange-600 border-orange-300 hover:bg-orange-50'
                   : 'text-gray-500 border-gray-200 hover:text-blue-600'
               }`}
-              title="スタンプ位置を調整"
+              title="スタンプのプレビュー・位置調整"
             >
-              📍 位置
+              🔍 プレビュー
             </button>
           </div>
         </div>

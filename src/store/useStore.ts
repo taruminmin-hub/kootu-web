@@ -58,6 +58,8 @@ interface AppState {
   toggleMergeBranches: (groupId: string) => void;
   reorderBranchFiles: (groupId: string, activeId: string, overId: string) => void;
   deleteFiles: (fileIds: string[]) => void;
+  /** sourceGroup を targetGroup の枝番として移動する */
+  moveGroupAsBranch: (sourceGroupId: string, targetGroupId: string) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -230,6 +232,24 @@ export const useStore = create<AppState>((set) => ({
       branches.splice(toIdx, 0, item);
       const gs = [...s.groups];
       gs[gIdx] = { ...group, branchFiles: branches };
+      return { groups: gs };
+    }),
+
+  moveGroupAsBranch: (sourceGroupId, targetGroupId) =>
+    set((s) => {
+      const srcIdx = s.groups.findIndex((g) => g.id === sourceGroupId);
+      const tgtIdx = s.groups.findIndex((g) => g.id === targetGroupId);
+      if (srcIdx < 0 || tgtIdx < 0 || srcIdx === tgtIdx) return s;
+      const src = s.groups[srcIdx];
+      const tgt = s.groups[tgtIdx];
+      const newBranches: FileEntry[] = [
+        ...tgt.branchFiles,
+        src.mainFile,
+        ...src.branchFiles,
+      ];
+      const gs = s.groups.filter((_, i) => i !== srcIdx);
+      const newTgtIdx = gs.findIndex((g) => g.id === targetGroupId);
+      gs[newTgtIdx] = { ...tgt, branchFiles: newBranches };
       return { groups: gs };
     }),
 

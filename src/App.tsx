@@ -3,7 +3,7 @@ import {
   DndContext, closestCenter,
   PointerSensor, useSensor, useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useStore } from './store/useStore';
 import { computeOutputFileNames, processAllFiles, downloadAsZip } from './utils/pdfProcessor';
@@ -39,7 +39,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function App() {
-  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles } = useStore();
+  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles, moveGroupAsBranch } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [converting, setConverting] = useState(false);
@@ -47,6 +47,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmFileNames, setConfirmFileNames] = useState<string[]>([]);
   const [processedResults, setProcessedResults] = useState<OutputFile[] | null>(null);
@@ -65,9 +66,21 @@ export default function App() {
     return s + n;
   }, 0);
 
+  const handleDragStart = (e: DragStartEvent) => {
+    setDraggingGroupId(String(e.active.id));
+  };
+
   const handleDragEnd = (e: DragEndEvent) => {
+    setDraggingGroupId(null);
     const { active, over } = e;
-    if (over && active.id !== over.id) reorderGroups(String(active.id), String(over.id));
+    if (!over || active.id === over.id) return;
+    const overId = String(over.id);
+    if (overId.startsWith('branch-drop-')) {
+      const targetGroupId = overId.replace('branch-drop-', '');
+      moveGroupAsBranch(String(active.id), targetGroupId);
+    } else {
+      reorderGroups(String(active.id), overId);
+    }
   };
 
   /** PDF・画像ファイルを受け取り、画像は PDF に変換してからリストに追加する */
@@ -287,6 +300,7 @@ export default function App() {
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
               >
                 <SortableContext
@@ -305,6 +319,7 @@ export default function App() {
                         selectionMode={selectionMode}
                         selectedIds={selectedIds}
                         onToggleSelect={toggleSelect}
+                        draggingGroupId={draggingGroupId}
                       />
                     ))}
                   </div>
