@@ -1,6 +1,6 @@
 export type SymbolType =
   | '甲' | '乙' | '丙' | '丁' | '戊'
-  | '疎甲' | '疎乙' | '弁' | '疎料' | '別紙'
+  | '疎甲' | '疎乙' | '弁' | '資料' | '別紙'
   | 'custom';
 
 /** PDF スタンプに印字する番号形式（3種） */
@@ -42,12 +42,16 @@ export interface FileEntry {
   customOutputName?: string;
   /** ファイルごとのスタンプ位置上書き。未設定はグローバル設定を使用 */
   customStampPosition?: StampPosition;
+  /** 出力時の回転角度 (度、時計回り)。0=無回転、90=CW90°、180=180°、270=CCW90° */
+  rotation: 0 | 90 | 180 | 270;
 }
 
 export interface FileGroup {
   id: string;
   mainFile: FileEntry;
   branchFiles: FileEntry[];
+  /** グループ単位の枝番結合設定。未設定はグローバル設定を使用 */
+  mergeBranches?: boolean;
 }
 
 export type PageNumberFormat = 'n' | 'n/total' | 'dash-n-dash';

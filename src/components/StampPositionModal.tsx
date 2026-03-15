@@ -11,13 +11,14 @@ interface Props {
   stampLabel: string;
   settings: Settings;
   initialPosition?: StampPosition;
+  rotation?: 0 | 90 | 180 | 270;
   onSave: (pos: StampPosition) => void;
   onReset: () => void;
   onClose: () => void;
 }
 
 export default function StampPositionModal({
-  file, stampLabel, settings, initialPosition, onSave, onReset, onClose,
+  file, stampLabel, settings, initialPosition, rotation, onSave, onReset, onClose,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -48,21 +49,59 @@ export default function StampPositionModal({
         const displayScale = Math.min(480 / vp.width, 680 / vp.height);
         const scaled = page.getViewport({ scale: displayScale });
 
+        // Render to offscreen canvas first
+        const offscreen = document.createElement('canvas');
+        offscreen.width = scaled.width;
+        offscreen.height = scaled.height;
+        const offCtx = offscreen.getContext('2d')!;
+        await page.render({ canvasContext: offCtx, viewport: scaled, canvas: offscreen }).promise;
+
         if (cancelled || !canvasRef.current) return;
-        const canvas = canvasRef.current;
-        canvas.width = scaled.width;
-        canvas.height = scaled.height;
-        const ctx = canvas.getContext('2d')!;
-        await page.render({ canvasContext: ctx, viewport: scaled, canvas }).promise;
-        if (!cancelled) {
+
+        const sw = scaled.width;
+        const sh = scaled.height;
+        const rot = rotation ?? 0;
+
+        if (rot === 90) {
+          canvasRef.current.width = sh;
+          canvasRef.current.height = sw;
+          const ctx = canvasRef.current.getContext('2d')!;
+          ctx.translate(sh, 0);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(offscreen, 0, 0);
+          setPdfSize({ w: vp.height, h: vp.width });
+          setCanvasSize({ w: sh, h: sw });
+        } else if (rot === 270) {
+          canvasRef.current.width = sh;
+          canvasRef.current.height = sw;
+          const ctx = canvasRef.current.getContext('2d')!;
+          ctx.translate(0, sw);
+          ctx.rotate(-Math.PI / 2);
+          ctx.drawImage(offscreen, 0, 0);
+          setPdfSize({ w: vp.height, h: vp.width });
+          setCanvasSize({ w: sh, h: sw });
+        } else if (rot === 180) {
+          canvasRef.current.width = sw;
+          canvasRef.current.height = sh;
+          const ctx = canvasRef.current.getContext('2d')!;
+          ctx.translate(sw, sh);
+          ctx.rotate(Math.PI);
+          ctx.drawImage(offscreen, 0, 0);
           setPdfSize({ w: vp.width, h: vp.height });
-          setCanvasSize({ w: scaled.width, h: scaled.height });
+          setCanvasSize({ w: sw, h: sh });
+        } else {
+          canvasRef.current.width = sw;
+          canvasRef.current.height = sh;
+          canvasRef.current.getContext('2d')!.drawImage(offscreen, 0, 0);
+          setPdfSize({ w: vp.width, h: vp.height });
+          setCanvasSize({ w: sw, h: sh });
         }
+
         pdf.destroy();
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
-  }, [file]);
+  }, [file, rotation]);
 
   // スタンプ画像のサイズを計算
   useEffect(() => {

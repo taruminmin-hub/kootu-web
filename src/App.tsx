@@ -6,12 +6,16 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useStore } from './store/useStore';
-import { processAllFiles, downloadAsZip } from './utils/pdfProcessor';
+import { computeOutputFileNames, processAllFiles, downloadAsZip } from './utils/pdfProcessor';
+import type { OutputFile } from './utils/pdfProcessor';
 import { imageToPdf, isImageFile, isPdfFile } from './utils/imageConverter';
+import { isPdfLandscape } from './utils/orientationDetector';
 import FileGroupRow from './components/FileGroupRow';
 import DropZone from './components/DropZone';
 import SettingsModal from './components/SettingsModal';
 import ProcessingOverlay from './components/ProcessingOverlay';
+import ConfirmOutputModal from './components/ConfirmOutputModal';
+import ResultModal from './components/ResultModal';
 import type { SymbolType } from './types';
 
 const SYMBOLS: { value: SymbolType; label: string }[] = [
@@ -23,7 +27,7 @@ const SYMBOLS: { value: SymbolType; label: string }[] = [
   { value: '疎甲', label: '疎甲' },
   { value: '疎乙', label: '疎乙' },
   { value: '弁', label: '弁' },
-  { value: '疎料', label: '疎料' },
+  { value: '資料', label: '資料' },
   { value: '別紙', label: '別紙' },
   { value: 'custom', label: 'カスタム' },
 ];
@@ -35,12 +39,17 @@ function formatSize(bytes: number): string {
 }
 
 export default function App() {
-  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll } = useStore();
+  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [converting, setConverting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmFileNames, setConfirmFileNames] = useState<string[]>([]);
+  const [processedResults, setProcessedResults] = useState<OutputFile[] | null>(null);
 
   // Google Fonts を Canvas で使えるよう preload
   useEffect(() => {
@@ -70,19 +79,24 @@ export default function App() {
     const images = acceptable.filter(isImageFile);
     const pdfs = acceptable.filter(isPdfFile);
 
-    if (images.length > 0) {
-      setConverting(true);
-      try {
-        const converted = await Promise.all(images.map(imageToPdf));
-        addFiles([...pdfs, ...converted]);
-      } catch (err) {
-        setError(err instanceof Error ? `画像変換失敗: ${err.message}` : '画像変換中にエラーが発生しました');
-        if (pdfs.length) addFiles(pdfs);
-      } finally {
-        setConverting(false);
-      }
-    } else {
-      addFiles(pdfs);
+    setConverting(true);
+    try {
+      // 画像 → PDF 変換（常に縦向きで出力）
+      const converted = await Promise.all(images.map(imageToPdf));
+
+      // 横向き PDF を自動検出して rotation=90 を設定
+      const allPdfs = [...pdfs, ...converted];
+      const withRotations = await Promise.all(
+        allPdfs.map(async (file) => ({
+          file,
+          rotation: (await isPdfLandscape(file) ? 90 : 0) as 0 | 90,
+        })),
+      );
+      addFiles(withRotations);
+    } catch (err) {
+      setError(err instanceof Error ? `ファイル処理失敗: ${err.message}` : 'ファイル処理中にエラーが発生しました');
+    } finally {
+      setConverting(false);
     }
   }, [addFiles]);
 
@@ -98,8 +112,28 @@ export default function App() {
     input.click();
   }, [handleAddFiles]);
 
-  const handleProcess = async () => {
+  const toggleSelect = useCallback((fileId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId); else next.add(fileId);
+      return next;
+    });
+  }, []);
+
+  const handleDeleteSelected = useCallback(() => {
+    deleteFiles(Array.from(selectedIds));
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }, [selectedIds, deleteFiles]);
+
+  const handleProcessClick = useCallback(() => {
     if (!groups.length) return;
+    setConfirmFileNames(computeOutputFileNames(groups, settings));
+    setShowConfirm(true);
+  }, [groups, settings]);
+
+  const handleConfirmProcess = useCallback(async () => {
+    setShowConfirm(false);
     setProcessing(true);
     setError(null);
     setProgress({ current: 0, total: 0 });
@@ -107,13 +141,18 @@ export default function App() {
       const results = await processAllFiles(groups, settings, (cur, tot) =>
         setProgress({ current: cur, total: tot }),
       );
-      await downloadAsZip(results);
+      setProcessedResults(results);
     } catch (err) {
       setError(err instanceof Error ? err.message : '処理中にエラーが発生しました');
     } finally {
       setProcessing(false);
     }
-  };
+  }, [groups, settings]);
+
+  const handleDownloadZip = useCallback(async () => {
+    if (!processedResults) return;
+    await downloadAsZip(processedResults);
+  }, [processedResults]);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -188,7 +227,7 @@ export default function App() {
           </button>
 
           <button
-            onClick={handleProcess}
+            onClick={handleProcessClick}
             disabled={!groups.length || processing}
             className="bg-green-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
@@ -202,6 +241,22 @@ export default function App() {
           >
             リストクリア
           </button>
+
+          {/* 選択モードボタン */}
+          <button
+            onClick={() => { setSelectionMode((m) => !m); setSelectedIds(new Set()); }}
+            className={`border rounded-lg px-4 py-2 text-sm ${selectionMode ? 'bg-blue-50 border-blue-400 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`}
+          >
+            {selectionMode ? '選択中...' : '選択削除'}
+          </button>
+          {selectionMode && selectedIds.size > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              className="bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-700"
+            >
+              削除 ({selectedIds.size}件)
+            </button>
+          )}
 
           {totalFiles > 0 && (
             <div className="mt-2 pt-3 border-t border-gray-100 text-sm text-gray-600 space-y-1">
@@ -247,6 +302,9 @@ export default function App() {
                         settings={settings}
                         isFirst={i === 0}
                         isLast={i === groups.length - 1}
+                        selectionMode={selectionMode}
+                        selectedIds={selectedIds}
+                        onToggleSelect={toggleSelect}
                       />
                     ))}
                   </div>
@@ -269,6 +327,20 @@ export default function App() {
             <p className="text-sm font-medium text-gray-700">画像を PDF に変換中…</p>
           </div>
         </div>
+      )}
+      {showConfirm && (
+        <ConfirmOutputModal
+          fileNames={confirmFileNames}
+          onConfirm={handleConfirmProcess}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
+      {processedResults && !processing && (
+        <ResultModal
+          results={processedResults}
+          onDownloadZip={handleDownloadZip}
+          onClose={() => setProcessedResults(null)}
+        />
       )}
     </div>
   );

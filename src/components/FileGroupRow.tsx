@@ -1,4 +1,7 @@
-import { useSortable } from '@dnd-kit/sortable';
+import React from 'react';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { FileGroup, Settings } from '../types';
 import { generateStampText, getSymbolText } from '../utils/stampUtils';
@@ -11,20 +14,69 @@ interface Props {
   settings: Settings;
   isFirst: boolean;
   isLast: boolean;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (fileId: string) => void;
 }
 
-export default function FileGroupRow({ group, index, settings, isFirst, isLast }: Props) {
-  const { removeGroup, removeBranch, makeBranch, makeMain, moveGroupUp, moveGroupDown, setCustomOutputName, setCustomStampPosition } = useStore();
+/** 枝番ファイルをドラッグで並び替えるためのラッパー */
+function SortableBranchItem({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+      }}
+      className="flex flex-col"
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="h-3.5 mb-0.5 flex items-center justify-center cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 bg-gray-100 hover:bg-gray-200 rounded text-xs select-none"
+        title="ドラッグで順序変更"
+      >
+        ⠿
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export default function FileGroupRow({
+  group, index, settings, isFirst, isLast,
+  selectionMode, selectedIds, onToggleSelect,
+}: Props) {
+  const {
+    removeGroup, removeBranch, makeBranch, makeMain,
+    moveGroupUp, moveGroupDown,
+    setCustomOutputName, setCustomStampPosition, setRotation,
+    toggleMergeBranches, reorderBranchFiles,
+  } = useStore();
 
   const {
     attributes, listeners, setNodeRef,
     transform, transition, isDragging,
   } = useSortable({ id: group.id });
 
+  const branchSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const handleBranchDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (over && active.id !== over.id) {
+      reorderBranchFiles(group.id, String(active.id), String(over.id));
+    }
+  };
+
   const sym = getSymbolText(settings.symbol, settings.customSymbol);
   const mainNum = settings.startNumber + index;
   const hasBranches = group.branchFiles.length > 0;
   const nl = settings.numberless;
+  const groupMerge = group.mergeBranches ?? settings.mergeBranches;
 
   const mainLabel = generateStampText(sym, mainNum, hasBranches ? 1 : null, settings.stampFormat, nl);
   const branchLabels = group.branchFiles.map((_, j) =>
@@ -71,44 +123,78 @@ export default function FileGroupRow({ group, index, settings, isFirst, isLast }
           >▼</button>
         </div>
         {hasBranches && (
-          <span className="text-[10px] text-purple-600 font-medium bg-purple-50 rounded px-1">
-            {settings.mergeBranches ? '結合' : '個別'}
-          </span>
+          <button
+            onClick={() => toggleMergeBranches(group.id)}
+            className={`text-[10px] font-medium rounded px-1 py-0.5 w-full text-center ${
+              groupMerge
+                ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            }`}
+            title={groupMerge ? '枝番を結合して1ファイルに出力中（クリックで解除）' : 'クリックで枝番を1ファイルに結合'}
+          >
+            {groupMerge ? '結合中' : '結合'}
+          </button>
         )}
       </div>
 
       {/* ファイルカード群（横並び） */}
-      <div className="flex flex-wrap gap-2 flex-1">
+      <div className="flex flex-wrap gap-2 flex-1 items-start">
+        {/* メインファイル */}
         <FileCard
           label={mainLabel}
           file={group.mainFile.file}
           customOutputName={group.mainFile.customOutputName}
           customStampPosition={group.mainFile.customStampPosition}
+          rotation={group.mainFile.rotation}
           isBranch={false}
           settings={settings}
+          selectionMode={selectionMode}
+          isSelected={selectedIds.has(group.mainFile.id)}
+          onToggleSelect={() => onToggleSelect(group.mainFile.id)}
           onRemove={() => removeGroup(group.id)}
           onMakeBranch={!isFirst ? () => makeBranch(group.id) : undefined}
           onRenameOutput={(name) => setCustomOutputName(group.id, group.mainFile.id, name)}
           onSavePosition={(pos) => setCustomStampPosition(group.id, group.mainFile.id, pos)}
           onResetPosition={() => setCustomStampPosition(group.id, group.mainFile.id, undefined)}
+          onRotate={(r) => setRotation(group.id, group.mainFile.id, r)}
         />
 
-        {group.branchFiles.map((entry, j) => (
-          <FileCard
-            key={entry.id}
-            label={branchLabels[j]}
-            file={entry.file}
-            customOutputName={entry.customOutputName}
-            customStampPosition={entry.customStampPosition}
-            isBranch={true}
-            settings={settings}
-            onRemove={() => removeBranch(group.id, entry.id)}
-            onMakeMain={() => makeMain(group.id, entry.id)}
-            onRenameOutput={(name) => setCustomOutputName(group.id, entry.id, name)}
-            onSavePosition={(pos) => setCustomStampPosition(group.id, entry.id, pos)}
-            onResetPosition={() => setCustomStampPosition(group.id, entry.id, undefined)}
-          />
-        ))}
+        {/* 枝番ファイル（ドラッグ並び替え可能） */}
+        {group.branchFiles.length > 0 && (
+          <DndContext
+            sensors={branchSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleBranchDragEnd}
+          >
+            <SortableContext
+              items={group.branchFiles.map((f) => f.id)}
+              strategy={horizontalListSortingStrategy}
+            >
+              {group.branchFiles.map((entry, j) => (
+                <SortableBranchItem key={entry.id} id={entry.id}>
+                  <FileCard
+                    label={branchLabels[j]}
+                    file={entry.file}
+                    customOutputName={entry.customOutputName}
+                    customStampPosition={entry.customStampPosition}
+                    rotation={entry.rotation}
+                    isBranch={true}
+                    settings={settings}
+                    selectionMode={selectionMode}
+                    isSelected={selectedIds.has(entry.id)}
+                    onToggleSelect={() => onToggleSelect(entry.id)}
+                    onRemove={() => removeBranch(group.id, entry.id)}
+                    onMakeMain={() => makeMain(group.id, entry.id)}
+                    onRenameOutput={(name) => setCustomOutputName(group.id, entry.id, name)}
+                    onSavePosition={(pos) => setCustomStampPosition(group.id, entry.id, pos)}
+                    onResetPosition={() => setCustomStampPosition(group.id, entry.id, undefined)}
+                    onRotate={(r) => setRotation(group.id, entry.id, r)}
+                  />
+                </SortableBranchItem>
+              ))}
+            </SortableContext>
+          </DndContext>
+        )}
       </div>
     </div>
   );

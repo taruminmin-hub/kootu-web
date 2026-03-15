@@ -33,6 +33,7 @@ const FILENAME_JOIN_FORMATS: { value: FileNameJoinFormat; label: string }[] = [
 export default function SettingsModal({ onClose }: Props) {
   const { settings, updateSettings } = useStore();
   const previewRef = useRef<HTMLCanvasElement>(null);
+  const pageNumPreviewRef = useRef<HTMLCanvasElement>(null);
 
   // スタンププレビューを更新
   useEffect(() => {
@@ -58,6 +59,36 @@ export default function SettingsModal({ onClose }: Props) {
     return () => { cancelled = true; };
   }, [settings.stampFormat, settings.fontSize, settings.color,
       settings.whiteBackground, settings.border, settings.symbol, settings.customSymbol]);
+
+  useEffect(() => {
+    if (!settings.pageNumberEnabled) {
+      if (pageNumPreviewRef.current) {
+        const ctx = pageNumPreviewRef.current.getContext('2d');
+        ctx?.clearRect(0, 0, pageNumPreviewRef.current.width, pageNumPreviewRef.current.height);
+      }
+      return;
+    }
+    let cancelled = false;
+    const text = settings.pageNumberFormat === 'n/total' ? '1/3'
+      : settings.pageNumberFormat === 'dash-n-dash' ? '- 1 -' : '1';
+    createStampImage(text, settings.pageNumberFontSize, settings.pageNumberColor, false, false)
+      .then((bytes) => {
+        if (cancelled || !pageNumPreviewRef.current) return;
+        const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'image/png' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          if (cancelled || !pageNumPreviewRef.current) { URL.revokeObjectURL(url); return; }
+          const ctx = pageNumPreviewRef.current.getContext('2d')!;
+          ctx.clearRect(0, 0, pageNumPreviewRef.current.width, pageNumPreviewRef.current.height);
+          ctx.drawImage(img, 0, 0, img.width / 3, img.height / 3);
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [settings.pageNumberEnabled, settings.pageNumberFormat, settings.pageNumberFontSize, settings.pageNumberColor]);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -300,6 +331,18 @@ export default function SettingsModal({ onClose }: Props) {
                       >{label}</button>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* ページ番号プレビュー */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <p className="text-xs text-gray-500 mb-2">ページ番号 プレビュー</p>
+                <div className={`bg-white border border-gray-200 rounded h-20 relative overflow-hidden flex items-end ${
+                  settings.pageNumberPosition === 'bottom-right' ? 'justify-end' :
+                  settings.pageNumberPosition === 'bottom-left' ? 'justify-start' : 'justify-center'
+                } p-2`}>
+                  <span className="text-xs text-gray-300 absolute inset-0 flex items-center justify-center">PDF</span>
+                  <canvas ref={pageNumPreviewRef} className="relative z-10" />
                 </div>
               </div>
             </div>
