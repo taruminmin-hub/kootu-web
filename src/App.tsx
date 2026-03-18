@@ -7,7 +7,7 @@ import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useStore } from './store/useStore';
 import { computeOutputFileNames, processAllFiles, downloadAsZip } from './utils/pdfProcessor';
-import type { OutputFile } from './utils/pdfProcessor';
+import type { ProcessResult } from './utils/pdfProcessor';
 import { imageToPdf, isImageFile, isPdfFile } from './utils/imageConverter';
 import { isPdfLandscape } from './utils/orientationDetector';
 import FileGroupRow from './components/FileGroupRow';
@@ -50,7 +50,7 @@ export default function App() {
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmFileNames, setConfirmFileNames] = useState<string[]>([]);
-  const [processedResults, setProcessedResults] = useState<OutputFile[] | null>(null);
+  const [processedResults, setProcessedResults] = useState<ProcessResult | null>(null);
 
   // Google Fonts を Canvas で使えるよう preload
   useEffect(() => {
@@ -151,10 +151,10 @@ export default function App() {
     setError(null);
     setProgress({ current: 0, total: 0 });
     try {
-      const results = await processAllFiles(groups, settings, (cur, tot) =>
+      const result = await processAllFiles(groups, settings, (cur, tot) =>
         setProgress({ current: cur, total: tot }),
       );
-      setProcessedResults(results);
+      setProcessedResults(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : '処理中にエラーが発生しました');
     } finally {
@@ -164,7 +164,7 @@ export default function App() {
 
   const handleDownloadZip = useCallback(async () => {
     if (!processedResults) return;
-    await downloadAsZip(processedResults);
+    await downloadAsZip(processedResults.files);
   }, [processedResults]);
 
   return (
@@ -352,7 +352,8 @@ export default function App() {
       )}
       {processedResults && !processing && (
         <ResultModal
-          results={processedResults}
+          results={processedResults.files}
+          warnings={processedResults.warnings}
           onDownloadZip={handleDownloadZip}
           onClose={() => setProcessedResults(null)}
         />

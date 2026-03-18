@@ -39,6 +39,7 @@ export default function StampPositionModal({
   // PDF レンダリング情報
   const [pdfSize, setPdfSize] = useState({ w: 595, h: 842 });
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  const [pdfLoadError, setPdfLoadError] = useState(false);
 
   // スタンプ画像の px サイズ
   const [stampPx, setStampPx] = useState({ w: 60, h: 20 });
@@ -108,7 +109,9 @@ export default function StampPositionModal({
         }
 
         pdf.destroy();
-      } catch { /* ignore */ }
+      } catch {
+        if (!cancelled) setPdfLoadError(true);
+      }
     })();
     return () => { cancelled = true; };
   }, [file, rotation]);
@@ -129,6 +132,7 @@ export default function StampPositionModal({
           setStampPx({ w: img.width / 3, h: img.height / 3 });
           setStampImageUrl(url);
         };
+        img.onerror = () => URL.revokeObjectURL(url);
         img.src = url;
       })
       .catch(() => {});
@@ -207,6 +211,13 @@ export default function StampPositionModal({
 
         {/* PDFプレビュー + ドラッグエリア */}
         <div className="flex-1 overflow-auto px-6 py-3">
+          {pdfLoadError ? (
+            <div className="flex flex-col items-center justify-center gap-3 h-40 bg-red-50 border border-red-200 rounded-xl text-red-600">
+              <span className="text-2xl">⚠</span>
+              <p className="text-sm font-medium">PDFのプレビューを表示できませんでした</p>
+              <p className="text-xs text-red-400">暗号化または破損している可能性があります</p>
+            </div>
+          ) : (
           <div
             ref={overlayRef}
             className="relative inline-block cursor-crosshair border border-gray-200 shadow"
@@ -228,6 +239,7 @@ export default function StampPositionModal({
               />
             )}
           </div>
+          )}
         </div>
 
         {/* 設定パネル */}

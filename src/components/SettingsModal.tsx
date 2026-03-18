@@ -53,6 +53,7 @@ export default function SettingsModal({ onClose }: Props) {
           ctx.drawImage(img, 0, 0, img.width / 3, img.height / 3);
           URL.revokeObjectURL(url);
         };
+        img.onerror = () => URL.revokeObjectURL(url);
         img.src = url;
       })
       .catch(() => {/* ignore */});
@@ -84,6 +85,7 @@ export default function SettingsModal({ onClose }: Props) {
           ctx.drawImage(img, 0, 0, img.width / 3, img.height / 3);
           URL.revokeObjectURL(url);
         };
+        img.onerror = () => URL.revokeObjectURL(url);
         img.src = url;
       })
       .catch(() => {});

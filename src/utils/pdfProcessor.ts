@@ -9,11 +9,17 @@ export interface OutputFile {
   data: Uint8Array;
 }
 
+export interface ProcessResult {
+  files: OutputFile[];
+  /** 処理中に発生した警告メッセージ（暗号化PDFなど） */
+  warnings: string[];
+}
+
 export async function processAllFiles(
   groups: FileGroup[],
   settings: Settings,
   onProgress: (current: number, total: number) => void,
-): Promise<OutputFile[]> {
+): Promise<ProcessResult> {
   const sym = getSymbolText(settings.symbol, settings.customSymbol);
   const nl = settings.numberless;
 
@@ -26,6 +32,7 @@ export async function processAllFiles(
 
   let current = 0;
   const results: OutputFile[] = [];
+  const warnings: string[] = [];
 
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
@@ -43,7 +50,17 @@ export async function processAllFiles(
         const stampText = generateStampText(sym, mainNum, branchNum, settings.stampFormat, nl);
 
         const srcBytes = await entry.file.arrayBuffer();
-        let srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+        let srcDoc: PDFDocument;
+        try {
+          srcDoc = await PDFDocument.load(srcBytes);
+        } catch {
+          try {
+            srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+            warnings.push(`"${entry.file.name}" は暗号化されています。スタンプが正しく適用されない場合があります。`);
+          } catch {
+            throw new Error(`"${entry.file.name}" を開けませんでした。暗号化または破損している可能性があります。`);
+          }
+        }
         srcDoc = await physicallyRotateDoc(srcDoc, entry.rotation);
         const copied = await merged.copyPages(srcDoc, srcDoc.getPageIndices());
 
@@ -88,7 +105,7 @@ export async function processAllFiles(
         const effectiveSettings = entry.customStampPosition
           ? { ...settings, marginRight: entry.customStampPosition.marginRight, marginTop: entry.customStampPosition.marginTop }
           : settings;
-        const pdfBytes = await stampSinglePdf(entry.file, stampText, effectiveSettings, entry.rotation);
+        const pdfBytes = await stampSinglePdf(entry.file, stampText, effectiveSettings, entry.rotation, warnings);
         const base = resolveOutputBaseName(entry);
         results.push({ name: buildFileName(numText, base, settings.fileNameJoinFormat, settings.customFileNameFormat), data: pdfBytes });
 
@@ -98,7 +115,7 @@ export async function processAllFiles(
     }
   }
 
-  return results;
+  return { files: results, warnings };
 }
 
 /**
@@ -159,18 +176,19 @@ async function stampSinglePdf(
   stampText: string,
   settings: Settings,
   rotation: 0 | 90 | 180 | 270 = 0,
+  warnings: string[] = [],
 ): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
   let doc: PDFDocument;
   try {
     doc = await PDFDocument.load(bytes);
   } catch {
-    // 暗号化PDFの場合は ignoreEncryption で再試行（コンテンツが正しく処理されない可能性あり）
+    // 暗号化PDFの場合は ignoreEncryption で再試行
     try {
       doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-      console.warn(`[kootu] "${file.name}" は暗号化またはパスワード保護されています。スタンプが正しく適用されない場合があります。`);
-    } catch (e2) {
-      throw new Error(`"${file.name}" を開けませんでした。暗号化されているか、破損している可能性があります。`);
+      warnings.push(`"${file.name}" は暗号化されています。スタンプが正しく適用されない場合があります。`);
+    } catch {
+      throw new Error(`"${file.name}" を開けませんでした。暗号化または破損している可能性があります。`);
     }
   }
   doc = await physicallyRotateDoc(doc, rotation);

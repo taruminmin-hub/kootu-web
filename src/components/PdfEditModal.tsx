@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePdfAllPages } from '../hooks/usePdfAllPages';
 import { rotateSinglePage, deleteSinglePage, splitPdfAfterPage } from '../utils/pdfEditUtils';
 
@@ -13,8 +13,16 @@ export default function PdfEditModal({ file, onReplaceFile, onSplitFile, onClose
   const [currentPage, setCurrentPage] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [confirm, setConfirm] = useState<'delete' | 'split' | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { pages, loading } = usePdfAllPages(file, 750);
   const pageCount = pages.length;
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  // wheel/keyboard ハンドラが常に最新値を参照できるよう ref で保持
+  const pageCountRef = useRef(pageCount);
+  const processingRef = useRef(processing);
+  useEffect(() => { pageCountRef.current = pageCount; }, [pageCount]);
+  useEffect(() => { processingRef.current = processing; }, [processing]);
 
   // ページ削除後などでカレントページが範囲外になるのを防ぐ
   useEffect(() => {
@@ -23,30 +31,50 @@ export default function PdfEditModal({ file, onReplaceFile, onSplitFile, onClose
     }
   }, [pageCount, currentPage]);
 
-  // キーボードナビゲーション
+  // キーボードナビゲーション（依存配列には onClose のみ）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (processing) return;
+      if (processingRef.current) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         e.preventDefault();
         setCurrentPage(p => Math.max(0, p - 1));
       } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault();
-        setCurrentPage(p => Math.min(pageCount - 1, p + 1));
+        setCurrentPage(p => Math.min(pageCountRef.current - 1, p + 1));
       } else if (e.key === 'Escape') {
         onClose();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [pageCount, processing, onClose]);
+  }, [onClose]);
+
+  // スクロールナビゲーション（マウント時に1回だけ登録）
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (processingRef.current || pageCountRef.current === 0) return;
+      e.preventDefault();
+      if (e.deltaY > 0) {
+        setCurrentPage(p => Math.min(pageCountRef.current - 1, p + 1));
+      } else if (e.deltaY < 0) {
+        setCurrentPage(p => Math.max(0, p - 1));
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []); // マウント時に1回だけ登録（ref経由で最新値を参照）
 
   const handleRotate = useCallback(async () => {
     setConfirm(null);
+    setError(null);
     setProcessing(true);
     try {
       const newFile = await rotateSinglePage(file, currentPage);
       onReplaceFile(newFile);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ページの回転に失敗しました');
     } finally {
       setProcessing(false);
     }
@@ -54,10 +82,13 @@ export default function PdfEditModal({ file, onReplaceFile, onSplitFile, onClose
 
   const handleDelete = useCallback(async () => {
     setConfirm(null);
+    setError(null);
     setProcessing(true);
     try {
       const newFile = await deleteSinglePage(file, currentPage);
       onReplaceFile(newFile);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ページの削除に失敗しました');
     } finally {
       setProcessing(false);
     }
@@ -65,12 +96,14 @@ export default function PdfEditModal({ file, onReplaceFile, onSplitFile, onClose
 
   const handleSplit = useCallback(async () => {
     setConfirm(null);
+    setError(null);
     setProcessing(true);
     try {
       const [file1, file2] = await splitPdfAfterPage(file, currentPage);
       onSplitFile(file1, file2);
       onClose();
-    } finally {
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ファイルの分割に失敗しました');
       setProcessing(false);
     }
   }, [file, currentPage, onSplitFile, onClose]);
@@ -104,14 +137,23 @@ export default function PdfEditModal({ file, onReplaceFile, onSplitFile, onClose
           </button>
         </div>
 
+        {/* ── エラーバナー ── */}
+        {error && (
+          <div className="shrink-0 mx-5 mt-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2">
+            <span className="text-red-500 shrink-0 mt-0.5">⚠</span>
+            <p className="text-xs text-red-700 leading-relaxed flex-1">{error}</p>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 text-sm shrink-0">✕</button>
+          </div>
+        )}
+
         {/* ── ボディ ── */}
         <div className="flex flex-1 overflow-hidden relative">
 
           {/* ── PDFプレビューエリア ── */}
           <div className="flex-1 bg-gray-100 flex flex-col overflow-hidden">
 
-            {/* ページ表示 */}
-            <div className="flex-1 flex items-center justify-center overflow-auto p-6">
+            {/* ページ表示（ホイールでページ送り） */}
+            <div ref={previewRef} className="flex-1 flex items-center justify-center overflow-auto p-6 select-none">
               {loading && pageCount === 0 ? (
                 <div className="flex flex-col items-center gap-4 text-gray-400">
                   <div className="w-14 h-14 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -291,7 +333,7 @@ export default function PdfEditModal({ file, onReplaceFile, onSplitFile, onClose
               {/* ヒント */}
               <div className="pt-2 border-t border-gray-100">
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  💡 ← → キーでページ移動。操作はPDFファイルに反映されます。
+                  💡 矢印ボタン・← →キー・スクロールでページ移動。操作はPDFファイルに反映されます。
                 </p>
               </div>
             </div>
