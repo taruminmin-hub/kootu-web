@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePdfThumbnail } from '../hooks/usePdfThumbnail';
 import StampPositionModal from './StampPositionModal';
+import PdfEditModal from './PdfEditModal';
 import type { StampPosition, Settings } from '../types';
 
 interface Props {
@@ -21,6 +22,8 @@ interface Props {
   onSavePosition?: (pos: StampPosition) => void;
   onResetPosition?: () => void;
   onRotate?: (rotation: 0 | 90 | 180 | 270) => void;
+  onReplaceFile?: (newFile: File) => void;
+  onSplitFile?: (file1: File, file2: File) => void;
 }
 
 export default function FileCard({
@@ -28,12 +31,14 @@ export default function FileCard({
   selectionMode, isSelected, onToggleSelect,
   onRemove, onMakeBranch, onMakeMain,
   onRenameOutput, onSavePosition, onResetPosition, onRotate,
+  onReplaceFile, onSplitFile,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [showPositionModal, setShowPositionModal] = useState(false);
+  const [showPdfEdit, setShowPdfEdit] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const thumbnail = usePdfThumbnail(file, 120);
+  const thumbnail = usePdfThumbnail(file, 160);
 
   const startEdit = () => {
     setDraft(customOutputName || file.name.replace(/\.[^.]+$/, ''));
@@ -49,11 +54,13 @@ export default function FileCard({
     setEditing(false);
   };
 
-  const rotateCW = () => {
+  const rotateCW = (e: React.MouseEvent) => {
+    e.stopPropagation();
     const next = ((rotation + 90) % 360) as 0 | 90 | 180 | 270;
     onRotate?.(next);
   };
-  const rotateCCW = () => {
+  const rotateCCW = (e: React.MouseEvent) => {
+    e.stopPropagation();
     const next = ((rotation + 270) % 360) as 0 | 90 | 180 | 270;
     onRotate?.(next);
   };
@@ -72,13 +79,27 @@ export default function FileCard({
       }
     : {};
 
+  const handleThumbnailClick = () => {
+    if (selectionMode) {
+      onToggleSelect?.();
+    } else {
+      setShowPdfEdit(true);
+    }
+  };
+
   return (
     <>
       <div className={`bg-white border rounded-lg overflow-hidden shadow-sm flex flex-col w-[160px] transition-all ${
         selectionMode && isSelected ? 'border-blue-500 ring-2 ring-blue-300' : 'border-gray-200'
       }`}>
-        {/* サムネイル */}
-        <div className="h-[100px] bg-gray-100 flex items-center justify-center overflow-hidden relative">
+        {/* サムネイル（クリックでプレビューモーダルを開く） */}
+        <div
+          className={`h-[140px] bg-gray-100 flex items-center justify-center overflow-hidden relative group ${
+            selectionMode ? 'cursor-pointer' : 'cursor-zoom-in'
+          }`}
+          onClick={handleThumbnailClick}
+          title={selectionMode ? undefined : 'クリックしてプレビュー・編集'}
+        >
           {thumbnail ? (
             <img
               src={thumbnail}
@@ -95,10 +116,21 @@ export default function FileCard({
               <span className="text-[10px]">PDF</span>
             </div>
           )}
+
+          {/* ホバー時のプレビューオーバーレイ（選択モード以外） */}
+          {!selectionMode && (
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-all pointer-events-none">
+              <span className="text-white text-xs font-medium bg-black/60 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                🔍 プレビュー・編集
+              </span>
+            </div>
+          )}
+
           {/* スタンプラベル（右上オーバーレイ） */}
           <div className="absolute top-1 right-1 bg-red-600 text-white text-[9px] font-bold px-1 py-0.5 rounded leading-none">
             {label}
           </div>
+
           {/* 回転ボタン */}
           <div className="absolute bottom-1 right-1 flex gap-0.5">
             <button
@@ -112,6 +144,7 @@ export default function FileCard({
               title="時計回りに90°回転"
             >↻</button>
           </div>
+
           {/* カスタム位置バッジ */}
           {hasCustomPos && (
             <div className="absolute bottom-1 left-1 bg-orange-500 text-white text-[8px] px-1 rounded leading-none">
@@ -203,9 +236,9 @@ export default function FileCard({
                   ? 'text-orange-600 border-orange-300 hover:bg-orange-50'
                   : 'text-gray-500 border-gray-200 hover:text-blue-600'
               }`}
-              title="スタンプのプレビュー・位置調整"
+              title="スタンプ位置を調整"
             >
-              🔍 プレビュー
+              📍 スタンプ位置
             </button>
           </div>
         </div>
@@ -221,6 +254,15 @@ export default function FileCard({
           onSave={(pos) => { onSavePosition?.(pos); }}
           onReset={() => { onResetPosition?.(); }}
           onClose={() => setShowPositionModal(false)}
+        />
+      )}
+
+      {showPdfEdit && (
+        <PdfEditModal
+          file={file}
+          onReplaceFile={(newFile) => { onReplaceFile?.(newFile); }}
+          onSplitFile={(f1, f2) => { onSplitFile?.(f1, f2); setShowPdfEdit(false); }}
+          onClose={() => setShowPdfEdit(false)}
         />
       )}
     </>

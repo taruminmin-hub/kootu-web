@@ -24,10 +24,17 @@ const defaultSettings: Settings = {
   mergeBranches: false,
 };
 
+const SETTINGS_VERSION = 1;
+
 function loadSettings(): Settings {
   try {
     const saved = localStorage.getItem('kootu-settings');
-    if (saved) return { ...defaultSettings, ...JSON.parse(saved) };
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // バージョンが一致しない場合はデフォルトにリセットして破損を防ぐ
+      if (parsed.__version !== SETTINGS_VERSION) return defaultSettings;
+      return { ...defaultSettings, ...parsed };
+    }
   } catch { /* ignore */ }
   return defaultSettings;
 }
@@ -60,6 +67,10 @@ interface AppState {
   deleteFiles: (fileIds: string[]) => void;
   /** sourceGroup を targetGroup の枝番として移動する */
   moveGroupAsBranch: (sourceGroupId: string, targetGroupId: string) => void;
+  /** ファイルの File オブジェクトを差し替える（ページ編集後に使用） */
+  replaceFile: (groupId: string, fileId: string, newFile: File) => void;
+  /** 1つのFileEntryを2ファイルに分割してグループ/枝番に展開する */
+  splitFileIntoTwo: (groupId: string, fileId: string, file1: File, file2: File) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -172,7 +183,9 @@ export const useStore = create<AppState>((set) => ({
   updateSettings: (partial) =>
     set((s) => {
       const newSettings = { ...s.settings, ...partial };
-      try { localStorage.setItem('kootu-settings', JSON.stringify(newSettings)); } catch { /* ignore */ }
+      try {
+        localStorage.setItem('kootu-settings', JSON.stringify({ ...newSettings, __version: SETTINGS_VERSION }));
+      } catch { /* ignore */ }
       return { settings: newSettings };
     }),
 
@@ -264,5 +277,55 @@ export const useStore = create<AppState>((set) => ({
             branchFiles: g.branchFiles.filter((f) => !idsSet.has(f.id)),
           })),
       };
+    }),
+
+  replaceFile: (groupId, fileId, newFile) =>
+    set((s) => ({
+      groups: s.groups.map((g) => {
+        if (g.id !== groupId) return g;
+        if (g.mainFile.id === fileId) {
+          return { ...g, mainFile: { ...g.mainFile, file: newFile } };
+        }
+        return {
+          ...g,
+          branchFiles: g.branchFiles.map((f) =>
+            f.id === fileId ? { ...f, file: newFile } : f,
+          ),
+        };
+      }),
+    })),
+
+  splitFileIntoTwo: (groupId, fileId, file1, file2) =>
+    set((s) => {
+      const gIdx = s.groups.findIndex((g) => g.id === groupId);
+      if (gIdx < 0) return s;
+      const group = s.groups[gIdx];
+
+      if (group.mainFile.id === fileId) {
+        // メインファイルを分割: file1 は現グループに、file2 は後に挿入した新グループに
+        const gs = [...s.groups];
+        gs[gIdx] = { ...group, mainFile: { ...group.mainFile, file: file1 } };
+        gs.splice(gIdx + 1, 0, {
+          id: genId(),
+          mainFile: { id: genId(), file: file2, rotation: group.mainFile.rotation },
+          branchFiles: [],
+        });
+        return { groups: gs };
+      }
+
+      // 枝番ファイルを分割: 同グループ内に新枝番として挿入
+      const branchIdx = group.branchFiles.findIndex((f) => f.id === fileId);
+      if (branchIdx < 0) return s;
+      const branchEntry = group.branchFiles[branchIdx];
+      const newBranches = [...group.branchFiles];
+      newBranches[branchIdx] = { ...branchEntry, file: file1 };
+      newBranches.splice(branchIdx + 1, 0, {
+        id: genId(),
+        file: file2,
+        rotation: branchEntry.rotation,
+      });
+      const gs = [...s.groups];
+      gs[gIdx] = { ...group, branchFiles: newBranches };
+      return { groups: gs };
     }),
 }));

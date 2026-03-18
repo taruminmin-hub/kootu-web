@@ -56,6 +56,7 @@ export default function FileGroupRow({
     moveGroupUp, moveGroupDown,
     setCustomOutputName, setCustomStampPosition, setRotation,
     toggleMergeBranches, reorderBranchFiles,
+    replaceFile, splitFileIntoTwo,
   } = useStore();
 
   const {
@@ -182,6 +183,8 @@ export default function FileGroupRow({
           onSavePosition={(pos) => setCustomStampPosition(group.id, group.mainFile.id, pos)}
           onResetPosition={() => setCustomStampPosition(group.id, group.mainFile.id, undefined)}
           onRotate={(r) => setRotation(group.id, group.mainFile.id, r)}
+          onReplaceFile={(newFile) => replaceFile(group.id, group.mainFile.id, newFile)}
+          onSplitFile={(f1, f2) => splitFileIntoTwo(group.id, group.mainFile.id, f1, f2)}
         />
 
         {/* 枝番ファイル（ドラッグ並び替え可能） */}
@@ -214,6 +217,8 @@ export default function FileGroupRow({
                     onSavePosition={(pos) => setCustomStampPosition(group.id, entry.id, pos)}
                     onResetPosition={() => setCustomStampPosition(group.id, entry.id, undefined)}
                     onRotate={(r) => setRotation(group.id, entry.id, r)}
+                    onReplaceFile={(newFile) => replaceFile(group.id, entry.id, newFile)}
+                    onSplitFile={(f1, f2) => splitFileIntoTwo(group.id, entry.id, f1, f2)}
                   />
                 </SortableBranchItem>
               ))}

@@ -161,7 +161,18 @@ async function stampSinglePdf(
   rotation: 0 | 90 | 180 | 270 = 0,
 ): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  let doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  let doc: PDFDocument;
+  try {
+    doc = await PDFDocument.load(bytes);
+  } catch {
+    // 暗号化PDFの場合は ignoreEncryption で再試行（コンテンツが正しく処理されない可能性あり）
+    try {
+      doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      console.warn(`[kootu] "${file.name}" は暗号化またはパスワード保護されています。スタンプが正しく適用されない場合があります。`);
+    } catch (e2) {
+      throw new Error(`"${file.name}" を開けませんでした。暗号化されているか、破損している可能性があります。`);
+    }
+  }
   doc = await physicallyRotateDoc(doc, rotation);
   const pages = doc.getPages();
   if (pages.length === 0) return new Uint8Array(bytes);
