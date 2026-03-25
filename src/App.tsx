@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
-  DndContext, closestCenter,
+  DndContext, closestCenter, DragOverlay,
   PointerSensor, useSensor, useSensors,
 } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
@@ -16,6 +16,8 @@ import SettingsModal from './components/SettingsModal';
 import ProcessingOverlay from './components/ProcessingOverlay';
 import ConfirmOutputModal from './components/ConfirmOutputModal';
 import ResultModal from './components/ResultModal';
+import AiSplitModal from './components/AiSplitModal';
+import AiNameModal from './components/AiNameModal';
 import type { SymbolType } from './types';
 
 const SYMBOLS: { value: SymbolType; label: string }[] = [
@@ -39,7 +41,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function App() {
-  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles, moveGroupAsBranch } = useStore();
+  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles, moveGroupAsBranch, addFilesFromSplit, batchRename } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [converting, setConverting] = useState(false);
@@ -51,6 +53,14 @@ export default function App() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmFileNames, setConfirmFileNames] = useState<string[]>([]);
   const [processedResults, setProcessedResults] = useState<ProcessResult | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showAiSplit, setShowAiSplit] = useState(false);
+  const [aiSplitFile, setAiSplitFile] = useState<File | null>(null);
+  const [showAiName, setShowAiName] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // カスタム符号が空の場合に処理を無効化
+  const isCustomSymbolEmpty = settings.symbol === 'custom' && !settings.customSymbol.trim();
 
   // Google Fonts を Canvas で使えるよう preload
   useEffect(() => {
@@ -125,6 +135,20 @@ export default function App() {
     input.click();
   }, [handleAddFiles]);
 
+  const openAiSplitPicker = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,application/pdf';
+    input.onchange = (e) => {
+      const files = Array.from((e.target as HTMLInputElement).files ?? []);
+      if (files.length > 0) {
+        setAiSplitFile(files[0]);
+        setShowAiSplit(true);
+      }
+    };
+    input.click();
+  }, []);
+
   const toggleSelect = useCallback((fileId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -170,7 +194,16 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* ── ヘッダー ── */}
-      <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-6 shadow-sm">
+      <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex items-center gap-4 md:gap-6 shadow-sm">
+        {/* モバイル: ハンバーガーメニュー */}
+        <button
+          onClick={() => setSidebarOpen(v => !v)}
+          className="md:hidden shrink-0 w-8 h-8 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
         <h1 className="text-base font-bold text-gray-800 shrink-0">証拠番号付与アプリ</h1>
 
         <div className="flex items-center gap-4 flex-wrap">
@@ -229,9 +262,15 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* モバイル: サイドバー背景オーバーレイ */}
+        {sidebarOpen && (
+          <div className="fixed inset-0 bg-black/30 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
+        )}
         {/* ── サイドバー ── */}
-        <aside className="w-52 bg-white border-r border-gray-200 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
+        <aside className={`w-52 bg-white border-r border-gray-200 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto transition-transform z-40 ${
+          sidebarOpen ? 'fixed inset-y-0 left-0 top-[53px] translate-x-0 shadow-xl' : 'hidden md:flex'
+        }`}>
           <button
             onClick={openFilePicker}
             className="bg-blue-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-2"
@@ -241,14 +280,37 @@ export default function App() {
 
           <button
             onClick={handleProcessClick}
-            disabled={!groups.length || processing}
+            disabled={!groups.length || processing || isCustomSymbolEmpty}
             className="bg-green-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            title={isCustomSymbolEmpty ? 'カスタム符号を入力してください' : undefined}
           >
             📋 PDFにスタンプ付与
           </button>
+          {isCustomSymbolEmpty && (
+            <p className="text-xs text-red-500">カスタム符号が未入力です</p>
+          )}
+
+          <hr className="border-gray-200" />
 
           <button
-            onClick={clearAll}
+            onClick={openAiSplitPicker}
+            className="bg-purple-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-purple-700 flex items-center justify-center gap-2"
+          >
+            🤖 AI分割
+          </button>
+
+          <button
+            onClick={() => setShowAiName(true)}
+            disabled={!groups.length}
+            className="border border-purple-300 text-purple-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            🤖 AI名前提案
+          </button>
+
+          <hr className="border-gray-200" />
+
+          <button
+            onClick={() => setShowClearConfirm(true)}
             disabled={!groups.length}
             className="border border-gray-300 rounded-lg px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -324,6 +386,20 @@ export default function App() {
                     ))}
                   </div>
                 </SortableContext>
+                <DragOverlay>
+                  {draggingGroupId ? (() => {
+                    const g = groups.find(g => g.id === draggingGroupId);
+                    if (!g) return null;
+                    return (
+                      <div className="bg-white border-2 border-blue-400 rounded-xl p-3 shadow-xl opacity-80 w-[200px]">
+                        <div className="text-sm font-medium text-gray-700 truncate">{g.mainFile.file.name}</div>
+                        {g.branchFiles.length > 0 && (
+                          <div className="text-xs text-gray-400 mt-1">+ {g.branchFiles.length} 枝番</div>
+                        )}
+                      </div>
+                    );
+                  })() : null}
+                </DragOverlay>
               </DndContext>
               <div className="mt-3">
                 <DropZone onDrop={handleAddFiles} compact />
@@ -357,6 +433,42 @@ export default function App() {
           onDownloadZip={handleDownloadZip}
           onClose={() => setProcessedResults(null)}
         />
+      )}
+      {showAiSplit && aiSplitFile && (
+        <AiSplitModal
+          file={aiSplitFile}
+          onComplete={(files) => addFilesFromSplit(files)}
+          onClose={() => { setShowAiSplit(false); setAiSplitFile(null); }}
+        />
+      )}
+      {showAiName && (
+        <AiNameModal
+          groups={groups}
+          onApply={(updates) => batchRename(updates)}
+          onClose={() => setShowAiName(false)}
+        />
+      )}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-xs">
+            <p className="text-sm font-medium text-gray-800 mb-1">リストをクリアしますか？</p>
+            <p className="text-xs text-gray-500 mb-4">すべてのファイルが削除されます。この操作は元に戻せません。</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => { clearAll(); setShowClearConfirm(false); }}
+                className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-red-700"
+              >
+                クリア
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

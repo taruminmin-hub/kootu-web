@@ -42,11 +42,13 @@ export default function PdfEditModal({ file, onReplaceFile, onSplitFile, onClose
         e.preventDefault();
         setCurrentPage(p => Math.min(pageCountRef.current - 1, p + 1));
       } else if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
         onClose();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // capture: true で先に捕捉し、下層モーダルに伝播させない
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
   // スクロールナビゲーション（マウント時に1回だけ登録）

@@ -1,3 +1,5 @@
+import { useRef, useEffect, useState } from 'react';
+
 interface Props {
   current: number;
   total: number;
@@ -5,6 +7,31 @@ interface Props {
 
 export default function ProcessingOverlay({ current, total }: Props) {
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  const startTimeRef = useRef<number>(Date.now());
+  const [eta, setEta] = useState<string | null>(null);
+
+  // 開始時刻をリセット
+  useEffect(() => {
+    startTimeRef.current = Date.now();
+  }, [total]);
+
+  // ETA 計算
+  useEffect(() => {
+    if (current <= 0 || total <= 0) {
+      setEta(null);
+      return;
+    }
+    const elapsed = Date.now() - startTimeRef.current;
+    const perFile = elapsed / current;
+    const remaining = perFile * (total - current);
+    if (remaining < 1000) {
+      setEta('まもなく完了');
+    } else if (remaining < 60000) {
+      setEta(`残り約 ${Math.ceil(remaining / 1000)} 秒`);
+    } else {
+      setEta(`残り約 ${Math.ceil(remaining / 60000)} 分`);
+    }
+  }, [current, total]);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -20,6 +47,9 @@ export default function ProcessingOverlay({ current, total }: Props) {
         <p className="text-xs text-gray-500">
           {current} / {total} ファイル完了
         </p>
+        {eta && (
+          <p className="text-xs text-gray-400">{eta}</p>
+        )}
       </div>
     </div>
   );

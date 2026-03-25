@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// PDF.js の Worker を CDN から読み込む（usePdfThumbnail と同じ設定）
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+import { pdfjsLib } from '../utils/pdfWorkerSetup';
 
 /**
  * PDF の全ページを DataURL 配列として返すフック。

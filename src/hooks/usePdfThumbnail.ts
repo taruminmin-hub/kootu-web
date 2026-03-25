@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// PDF.js の Worker を CDN から読み込む（バンドルサイズ削減）
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+import { pdfjsLib } from '../utils/pdfWorkerSetup';
 
 /** PDF ファイルの最初のページをサムネイル DataURL として返すフック */
 export function usePdfThumbnail(file: File | null, width = 120): string | null {

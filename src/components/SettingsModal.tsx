@@ -48,9 +48,12 @@ export default function SettingsModal({ onClose }: Props) {
         const img = new Image();
         img.onload = () => {
           if (cancelled || !previewRef.current) { URL.revokeObjectURL(url); return; }
+          const dw = Math.ceil(img.width / 3);
+          const dh = Math.ceil(img.height / 3);
+          previewRef.current.width = dw;
+          previewRef.current.height = dh;
           const ctx = previewRef.current.getContext('2d')!;
-          ctx.clearRect(0, 0, previewRef.current.width, previewRef.current.height);
-          ctx.drawImage(img, 0, 0, img.width / 3, img.height / 3);
+          ctx.drawImage(img, 0, 0, dw, dh);
           URL.revokeObjectURL(url);
         };
         img.onerror = () => URL.revokeObjectURL(url);
@@ -80,9 +83,12 @@ export default function SettingsModal({ onClose }: Props) {
         const img = new Image();
         img.onload = () => {
           if (cancelled || !pageNumPreviewRef.current) { URL.revokeObjectURL(url); return; }
+          const dw = Math.ceil(img.width / 3);
+          const dh = Math.ceil(img.height / 3);
+          pageNumPreviewRef.current.width = dw;
+          pageNumPreviewRef.current.height = dh;
           const ctx = pageNumPreviewRef.current.getContext('2d')!;
-          ctx.clearRect(0, 0, pageNumPreviewRef.current.width, pageNumPreviewRef.current.height);
-          ctx.drawImage(img, 0, 0, img.width / 3, img.height / 3);
+          ctx.drawImage(img, 0, 0, dw, dh);
           URL.revokeObjectURL(url);
         };
         img.onerror = () => URL.revokeObjectURL(url);

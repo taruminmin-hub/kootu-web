@@ -69,3 +69,32 @@ export async function splitPdfAfterPage(
     new File([bytes2.buffer as ArrayBuffer], `${baseName}_2.pdf`, { type: 'application/pdf' }),
   ];
 }
+
+/**
+ * PDF を複数のセグメントに分割する。
+ * segments: [{ startPage, endPage, name }] (0始まり、endPage は inclusive)
+ */
+export async function splitPdfBySegments(
+  file: File,
+  segments: Array<{ startPage: number; endPage: number; name: string }>,
+): Promise<File[]> {
+  const bytes = await file.arrayBuffer();
+  const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const results: File[] = [];
+
+  for (const seg of segments) {
+    const doc = await PDFDocument.create();
+    const indices = Array.from(
+      { length: seg.endPage - seg.startPage + 1 },
+      (_, i) => seg.startPage + i,
+    );
+    const pages = await doc.copyPages(src, indices);
+    for (const p of pages) doc.addPage(p);
+    const pdfBytes = await doc.save();
+    results.push(
+      new File([pdfBytes.buffer as ArrayBuffer], `${seg.name}.pdf`, { type: 'application/pdf' }),
+    );
+  }
+
+  return results;
+}

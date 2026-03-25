@@ -86,6 +86,11 @@ export async function processAllFiles(
         for (const page of copied) merged.addPage(page);
       }
 
+      // ページ番号（全ページ）
+      if (settings.pageNumberEnabled) {
+        await addPageNumbers(merged, merged.getPages(), settings);
+      }
+
       const pdfBytes = await merged.save();
       const numText = generateFileNameNumber(sym, mainNum, null, settings.fileNameNumberFormat, nl);
       const base = resolveOutputBaseName(group.mainFile);

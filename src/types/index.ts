@@ -92,3 +92,19 @@ export interface Settings {
   // 処理設定
   mergeBranches: boolean;
 }
+
+// ── AI 分析関連 ──
+
+export interface AiSplitSegment {
+  startPage: number;
+  endPage: number;
+  suggestedName: string;
+  documentType: string;
+  confidence: number;
+}
+
+export interface AiNameSuggestion {
+  pageIndex: number;
+  suggestedName: string;
+  documentType: string;
+}

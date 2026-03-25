@@ -1,11 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfWorkerSetup';
 import type { StampPosition, Settings, StampColor } from '../types';
 import { createStampImage } from '../utils/stampUtils';
 import { useStore } from '../store/useStore';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 interface Props {
   file: File;
@@ -180,6 +177,18 @@ export default function StampPositionModal({
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [handleMouseMove, handleMouseUp]);
+
+  // Escape キーで閉じる（上層モーダルのみ反応するよう capture + stopImmediatePropagation）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
 
   const stampLeft = canvasSize.w - (pos.marginRight + stampPx.w) * scale;
   const stampTop  = pos.marginTop * scale;

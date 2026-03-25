@@ -40,7 +40,7 @@ function loadSettings(): Settings {
 }
 
 function genId(): string {
-  return Math.random().toString(36).slice(2, 10);
+  return crypto.randomUUID();
 }
 
 interface AppState {
@@ -71,6 +71,10 @@ interface AppState {
   replaceFile: (groupId: string, fileId: string, newFile: File) => void;
   /** 1つのFileEntryを2ファイルに分割してグループ/枝番に展開する */
   splitFileIntoTwo: (groupId: string, fileId: string, file1: File, file2: File) => void;
+  /** AI分割結果のファイル群をグループとして追加する（名前付き） */
+  addFilesFromSplit: (files: Array<{ file: File; suggestedName: string }>) => void;
+  /** 複数ファイルの出力名を一括で更新する */
+  batchRename: (updates: Array<{ groupId: string; fileId: string; name: string }>) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -269,14 +273,22 @@ export const useStore = create<AppState>((set) => ({
   deleteFiles: (fileIds) =>
     set((s) => {
       const idsSet = new Set(fileIds);
-      return {
-        groups: s.groups
-          .filter((g) => !idsSet.has(g.mainFile.id))
-          .map((g) => ({
-            ...g,
-            branchFiles: g.branchFiles.filter((f) => !idsSet.has(f.id)),
-          })),
-      };
+      const newGroups: FileGroup[] = [];
+      for (const g of s.groups) {
+        const mainDeleted = idsSet.has(g.mainFile.id);
+        const survivingBranches = g.branchFiles.filter((f) => !idsSet.has(f.id));
+        if (mainDeleted) {
+          // メインが削除対象: 残った枝番の先頭を新メインに昇格
+          if (survivingBranches.length > 0) {
+            const [newMain, ...rest] = survivingBranches;
+            newGroups.push({ ...g, mainFile: newMain, branchFiles: rest });
+          }
+          // 残りなし → グループごと削除
+        } else {
+          newGroups.push({ ...g, branchFiles: survivingBranches });
+        }
+      }
+      return { groups: newGroups };
     }),
 
   replaceFile: (groupId, fileId, newFile) =>
@@ -327,5 +339,45 @@ export const useStore = create<AppState>((set) => ({
       const gs = [...s.groups];
       gs[gIdx] = { ...group, branchFiles: newBranches };
       return { groups: gs };
+    }),
+
+  addFilesFromSplit: (files) =>
+    set((s) => ({
+      groups: [
+        ...s.groups,
+        ...files.map((item): FileGroup => ({
+          id: genId(),
+          mainFile: {
+            id: genId(),
+            file: item.file,
+            customOutputName: item.suggestedName,
+            rotation: 0,
+          },
+          branchFiles: [],
+        })),
+      ],
+    })),
+
+  batchRename: (updates) =>
+    set((s) => {
+      const map = new Map(updates.map((u) => [`${u.groupId}:${u.fileId}`, u.name]));
+      return {
+        groups: s.groups.map((g) => {
+          const mainKey = `${g.id}:${g.mainFile.id}`;
+          const mainName = map.get(mainKey);
+          const newMain = mainName !== undefined
+            ? { ...g.mainFile, customOutputName: mainName }
+            : g.mainFile;
+          return {
+            ...g,
+            mainFile: newMain,
+            branchFiles: g.branchFiles.map((f) => {
+              const branchKey = `${g.id}:${f.id}`;
+              const branchName = map.get(branchKey);
+              return branchName !== undefined ? { ...f, customOutputName: branchName } : f;
+            }),
+          };
+        }),
+      };
     }),
 }));

@@ -7,4 +7,12 @@ export default defineConfig({
   // GitHub Pages にデプロイする場合は base をリポジトリ名に変更してください
   // 例: base: '/kootu-web/'
   base: '/',
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
 })
