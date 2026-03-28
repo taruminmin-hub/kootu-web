@@ -1,4 +1,4 @@
-import { PDFDocument, degrees } from 'pdf-lib';
+import { PDFDocument, degrees, rgb } from 'pdf-lib';
 
 /**
  * PDFの指定ページを時計回りに90°回転させた新しいFileを返す。
@@ -150,4 +150,45 @@ export async function splitPdfBySegments(
   }
 
   return results;
+}
+
+/**
+ * 墨消し矩形の定義（PDFページ座標系: 左下原点）
+ */
+export interface RedactionRect {
+  /** ページインデックス（0始まり） */
+  pageIndex: number;
+  /** 矩形の左端（pt、PDF座標） */
+  x: number;
+  /** 矩形の下端（pt、PDF座標） */
+  y: number;
+  /** 矩形の幅（pt） */
+  width: number;
+  /** 矩形の高さ（pt） */
+  height: number;
+}
+
+/**
+ * PDFに墨消し（黒塗り矩形）を適用した新しいFileを返す。
+ */
+export async function applyRedactions(
+  file: File,
+  redactions: RedactionRect[],
+): Promise<File> {
+  const bytes = await file.arrayBuffer();
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+
+  for (const r of redactions) {
+    const page = doc.getPage(r.pageIndex);
+    page.drawRectangle({
+      x: r.x,
+      y: r.y,
+      width: r.width,
+      height: r.height,
+      color: rgb(0, 0, 0),
+    });
+  }
+
+  const newBytes = await doc.save();
+  return new File([newBytes.buffer as ArrayBuffer], file.name, { type: 'application/pdf' });
 }

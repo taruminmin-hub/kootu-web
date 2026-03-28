@@ -8,6 +8,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useStore } from './store/useStore';
 import { useFileManagement } from './hooks/useFileManagement';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { printAllWithStamps } from './utils/printUtils';
 import FileGroupRow from './components/FileGroupRow';
 import DropZone from './components/DropZone';
 import SettingsModal from './components/SettingsModal';
@@ -48,6 +49,7 @@ export default function App() {
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mainAreaDragOver, setMainAreaDragOver] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   // Undo スナックバーの自動非表示（8秒後）
   useEffect(() => {
@@ -228,6 +230,25 @@ export default function App() {
           {fm.isCustomSymbolEmpty && (
             <p className="text-xs text-red-500">カスタム符号が未入力です</p>
           )}
+
+          <button
+            onClick={async () => {
+              if (!groups.length || printing) return;
+              setPrinting(true);
+              try {
+                await printAllWithStamps(groups, settings, () => {});
+              } catch {
+                // エラーは printAllWithStamps 内で処理
+              } finally {
+                setPrinting(false);
+              }
+            }}
+            disabled={!groups.length || printing || fm.isCustomSymbolEmpty}
+            className="border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            title="証拠番号を付与してまとめて印刷"
+          >
+            🖨 まとめて印刷
+          </button>
 
           <hr className="border-gray-200" />
 

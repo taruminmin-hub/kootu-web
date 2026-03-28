@@ -10,11 +10,16 @@ import { pdfjsLib } from '../utils/pdfWorkerSetup';
 import { createStampImage } from '../utils/stampUtils';
 import {
   reorderPages, rotateMultiplePages, deleteMultiplePages, splitPdfAfterPage,
+  applyRedactions,
 } from '../utils/pdfEditUtils';
+import type { RedactionRect } from '../utils/pdfEditUtils';
 import { useStore } from '../store/useStore';
+import { printPageImage } from '../utils/printUtils';
 import type { StampPosition, Settings, StampColor } from '../types';
 import StampToolbar from './preview/StampToolbar';
 import PageEditToolbar from './preview/PageEditToolbar';
+import RedactionOverlay from './preview/RedactionOverlay';
+import type { RedactionBox } from './preview/RedactionOverlay';
 
 interface Props {
   file: File;
@@ -83,6 +88,10 @@ export default function PdfPreviewPanel({
   const [editProcessing, setEditProcessing] = useState(false);
   const [editConfirm, setEditConfirm] = useState<'delete' | 'split' | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+
+  // ── 墨消し（状態のみ、ハンドラーは pdfSize/firstPageRect 宣言後に定義） ──
+  const [redactionMode, setRedactionMode] = useState(false);
+  const [redactionBoxes, setRedactionBoxes] = useState<Map<number, RedactionBox[]>>(new Map());
 
   // ── ドラッグ中のページ ──
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
@@ -236,6 +245,63 @@ export default function PdfPreviewPanel({
     setStampEditing(false);
   };
   const anyStampChanged = posChanged || stampStyleChanged;
+
+  // ── 墨消しハンドラー ──
+  const currentPageBoxes = redactionBoxes.get(currentPage) ?? [];
+  const totalRedactions = Array.from(redactionBoxes.values()).reduce((s, b) => s + b.length, 0);
+
+  const handleAddRedactionBox = useCallback((box: RedactionBox) => {
+    setRedactionBoxes(prev => {
+      const next = new Map(prev);
+      const existing = next.get(currentPage) ?? [];
+      next.set(currentPage, [...existing, box]);
+      return next;
+    });
+  }, [currentPage]);
+
+  const handleRemoveRedactionBox = useCallback((id: string) => {
+    setRedactionBoxes(prev => {
+      const next = new Map(prev);
+      const existing = next.get(currentPage) ?? [];
+      next.set(currentPage, existing.filter(b => b.id !== id));
+      return next;
+    });
+  }, [currentPage]);
+
+  const handleApplyRedactions = useCallback(async () => {
+    if (totalRedactions === 0) return;
+    setEditError(null);
+    setEditProcessing(true);
+    try {
+      const rects: RedactionRect[] = [];
+      for (const [pageIdx, boxes] of redactionBoxes.entries()) {
+        for (const box of boxes) {
+          const pdfW = pdfSize.w;
+          const pdfH = pdfSize.h;
+          const displayW = firstPageRect.w;
+          const displayH = firstPageRect.h;
+          if (displayW <= 0 || displayH <= 0) continue;
+          const sx = pdfW / displayW;
+          const sy = pdfH / displayH;
+          rects.push({
+            pageIndex: pageIdx,
+            x: box.x * sx,
+            y: pdfH - (box.y + box.height) * sy,
+            width: box.width * sx,
+            height: box.height * sy,
+          });
+        }
+      }
+      const newFile = await applyRedactions(file, rects);
+      onReplaceFile(newFile);
+      setRedactionBoxes(new Map());
+      setRedactionMode(false);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : '墨消しの適用に失敗しました');
+    } finally {
+      setEditProcessing(false);
+    }
+  }, [file, redactionBoxes, totalRedactions, pdfSize, firstPageRect, onReplaceFile]);
 
   // ── ページクリック（複数選択対応） ──
   const handlePageClick = useCallback((pageIndex: number, e: React.MouseEvent) => {
@@ -486,9 +552,31 @@ export default function PdfPreviewPanel({
           >
             <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
             {renderStampOverlay(i)}
+            {viewMode === 'single' && !isGrid && (
+              <RedactionOverlay
+                containerWidth={firstPageRect.w}
+                containerHeight={firstPageRect.h}
+                boxes={currentPageBoxes}
+                onAddBox={handleAddRedactionBox}
+                onRemoveBox={handleRemoveRedactionBox}
+                enabled={redactionMode && !stampEditing}
+              />
+            )}
           </div>
         ) : (
-          <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
+          <div className="relative">
+            <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
+            {viewMode === 'single' && !isGrid && redactionMode && (
+              <RedactionOverlay
+                containerWidth={firstPageRect.w}
+                containerHeight={firstPageRect.h}
+                boxes={redactionBoxes.get(i) ?? []}
+                onAddBox={handleAddRedactionBox}
+                onRemoveBox={handleRemoveRedactionBox}
+                enabled={redactionMode && !stampEditing}
+              />
+            )}
+          </div>
         )}
 
         {/* ページ番号バッジ */}
@@ -536,6 +624,19 @@ export default function PdfPreviewPanel({
             一覧
           </button>
         </div>
+
+        {/* 印刷ボタン */}
+        <button
+          onClick={() => {
+            const dataUrl = pages[currentPage];
+            if (dataUrl) printPageImage(dataUrl, `${displayName} - ページ ${currentPage + 1}`);
+          }}
+          disabled={!pages[currentPage]}
+          className="shrink-0 text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-40"
+          title="このページを印刷"
+        >
+          🖨 印刷
+        </button>
 
         <button
           onClick={onClose}
@@ -592,6 +693,44 @@ export default function PdfPreviewPanel({
           onSelectAll={selectAll}
           onDeselectAll={deselectAll}
         />
+
+        {/* 墨消しツールバー */}
+        {!stampEditing && (
+          <div className="px-4 py-1.5 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+            {!redactionMode ? (
+              <button
+                onClick={() => { setRedactionMode(true); setViewMode('single'); setSelectedPages(new Set()); setEditConfirm(null); }}
+                className="text-xs text-gray-600 hover:text-gray-800 border border-gray-300 rounded px-2.5 py-1 hover:bg-gray-100 font-medium"
+              >
+                ■ 墨消し
+              </button>
+            ) : (
+              <>
+                <span className="text-xs text-gray-700 font-medium">■ 墨消しモード</span>
+                <span className="text-[10px] text-gray-500">
+                  {totalRedactions > 0 ? `${totalRedactions}箇所` : 'ドラッグで範囲選択'}
+                </span>
+                <div className="ml-auto flex items-center gap-1.5">
+                  {totalRedactions > 0 && (
+                    <button
+                      onClick={handleApplyRedactions}
+                      disabled={editProcessing}
+                      className="text-[10px] text-white bg-gray-800 hover:bg-gray-900 disabled:opacity-50 rounded px-2.5 py-0.5 font-medium"
+                    >
+                      適用 ({totalRedactions})
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setRedactionMode(false); setRedactionBoxes(new Map()); }}
+                    className="text-[10px] text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* エラーバナー */}
