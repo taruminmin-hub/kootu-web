@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePdfThumbnail } from '../hooks/usePdfThumbnail';
-import PdfEditModal from './PdfEditModal';
 import type { Settings } from '../types';
 
 interface Props {
@@ -23,8 +22,6 @@ interface Props {
   onSavePosition?: (pos: import('../types').StampPosition) => void;
   onResetPosition?: () => void;
   onRotate?: (rotation: 0 | 90 | 180 | 270) => void;
-  onReplaceFile?: (newFile: File) => void;
-  onSplitFile?: (file1: File, file2: File) => void;
 }
 
 export default function FileCard({
@@ -32,11 +29,9 @@ export default function FileCard({
   selectionMode, isSelected, isPreviewing, onToggleSelect, onPreviewSelect,
   onRemove, onMakeBranch, onMakeMain,
   onRenameOutput, onRotate,
-  onReplaceFile, onSplitFile,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  const [showPdfEdit, setShowPdfEdit] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const thumbnail = usePdfThumbnail(file, 160);
 
@@ -87,15 +82,8 @@ export default function FileCard({
     }
   };
 
-  const handleThumbnailDoubleClick = () => {
-    if (!selectionMode) {
-      setShowPdfEdit(true);
-    }
-  };
-
   return (
-    <>
-      <div className={`bg-white border rounded-lg overflow-hidden shadow-sm flex flex-col w-[160px] transition-all ${
+    <div className={`bg-white border rounded-lg overflow-hidden shadow-sm flex flex-col w-[160px] transition-all ${
         selectionMode && isSelected ? 'border-blue-500 ring-2 ring-blue-300'
         : isPreviewing ? 'border-blue-500 ring-2 ring-blue-200 shadow-md'
         : 'border-gray-200'
@@ -106,8 +94,7 @@ export default function FileCard({
             selectionMode ? 'cursor-pointer' : 'cursor-zoom-in'
           }`}
           onClick={handleThumbnailClick}
-          onDoubleClick={handleThumbnailDoubleClick}
-          title={selectionMode ? undefined : 'クリックでプレビュー / ダブルクリックで編集'}
+          title={selectionMode ? undefined : 'クリックでプレビュー'}
         >
           {thumbnail ? (
             <img
@@ -134,12 +121,6 @@ export default function FileCard({
                 onClick={(e) => { e.stopPropagation(); onPreviewSelect?.(); }}
               >
                 プレビュー
-              </span>
-              <span
-                className="text-white text-[10px] bg-black/50 px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto cursor-pointer hover:bg-black/70"
-                onClick={(e) => { e.stopPropagation(); setShowPdfEdit(true); }}
-              >
-                ページ編集
               </span>
             </div>
           )}
@@ -242,15 +223,5 @@ export default function FileCard({
           </div>
         </div>
       </div>
-
-      {showPdfEdit && (
-        <PdfEditModal
-          file={file}
-          onReplaceFile={(newFile) => { onReplaceFile?.(newFile); }}
-          onSplitFile={(f1, f2) => { onSplitFile?.(f1, f2); setShowPdfEdit(false); }}
-          onClose={() => setShowPdfEdit(false)}
-        />
-      )}
-    </>
   );
 }

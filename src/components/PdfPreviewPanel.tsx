@@ -51,7 +51,12 @@ export default function PdfPreviewPanel({
   file, label, customOutputName, customStampPosition, rotation,
   settings, onClose, onReplaceFile, onSplitFile, onSavePosition, onResetPosition,
 }: Props) {
-  const { pages, loading } = usePdfAllPages(file, 250);
+  // 単一ページ表示: 高解像度、グリッド表示: サムネイル
+  const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
+  const [currentPage, setCurrentPage] = useState(0);
+
+  const thumbWidth = viewMode === 'grid' ? 250 : 700;
+  const { pages, loading } = usePdfAllPages(file, thumbWidth);
   const displayName = customOutputName?.trim() || file.name.replace(/\.[^.]+$/, '');
   const totalPages = pages.length;
 
@@ -65,6 +70,7 @@ export default function PdfPreviewPanel({
   // ── ページ選択（複数対応） ──
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
   const lastClickedRef = useRef<number | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // ── 編集状態 ──
   const [editProcessing, setEditProcessing] = useState(false);
@@ -74,7 +80,7 @@ export default function PdfPreviewPanel({
   // ── ドラッグ中のページ ──
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
 
-  // ページ数変動時に選択を範囲内に維持
+  // ページ数変動時に選択/currentPageを範囲内に維持
   useEffect(() => {
     if (pages.length === 0) return;
     setSelectedPages(prev => {
@@ -82,6 +88,7 @@ export default function PdfPreviewPanel({
       prev.forEach(i => { if (i < pages.length) next.add(i); });
       return next.size === prev.size ? prev : next;
     });
+    setCurrentPage(prev => Math.min(prev, pages.length - 1));
   }, [pages.length]);
 
   // PDF 1ページ目のサイズ（pt）とCanvas描画サイズ
@@ -128,7 +135,7 @@ export default function PdfPreviewPanel({
     });
     obs.observe(firstPageRef.current);
     return () => obs.disconnect();
-  }, [pages.length]);
+  }, [pages.length, viewMode]);
 
   // スタンプ画像生成
   useEffect(() => {
@@ -157,7 +164,7 @@ export default function PdfPreviewPanel({
   }, [label, settings.fontSize, settings.color, settings.whiteBackground, settings.border]);
 
   // ── スタンプ位置ドラッグ ──
-  const dragging = useRef(false);
+  const stampDragging = useRef(false);
 
   const updatePosFromEvent = useCallback((clientX: number, clientY: number) => {
     if (!firstPageRef.current) return;
@@ -177,16 +184,16 @@ export default function PdfPreviewPanel({
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (!stampEditing) return;
-    dragging.current = true;
+    stampDragging.current = true;
     updatePosFromEvent(e.clientX, e.clientY);
   }, [stampEditing, updatePosFromEvent]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!dragging.current) return;
+    if (!stampDragging.current) return;
     updatePosFromEvent(e.clientX, e.clientY);
   }, [updatePosFromEvent]);
 
-  const handleMouseUp = useCallback(() => { dragging.current = false; }, []);
+  const handleMouseUp = useCallback(() => { stampDragging.current = false; }, []);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
@@ -220,30 +227,84 @@ export default function PdfPreviewPanel({
 
     setSelectedPages(prev => {
       if (e.ctrlKey || e.metaKey) {
-        // トグル
         const next = new Set(prev);
         if (next.has(pageIndex)) next.delete(pageIndex); else next.add(pageIndex);
         lastClickedRef.current = pageIndex;
         return next;
       }
       if (e.shiftKey && lastClickedRef.current !== null) {
-        // 範囲選択
         const from = Math.min(lastClickedRef.current, pageIndex);
         const to = Math.max(lastClickedRef.current, pageIndex);
         const next = new Set(prev);
         for (let i = from; i <= to; i++) next.add(i);
         return next;
       }
-      // 通常クリック：単一選択 or 選択解除
       lastClickedRef.current = pageIndex;
       if (prev.size === 1 && prev.has(pageIndex)) return new Set();
       return new Set([pageIndex]);
     });
   }, [stampEditing]);
 
+  // ── Shift+矢印キーで選択拡張 ──
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const handler = (e: KeyboardEvent) => {
+      if (stampEditing || totalPages === 0) return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+
+      const isNext = e.key === 'ArrowDown' || e.key === 'ArrowRight';
+      const isPrev = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
+      if (!isNext && !isPrev) return;
+
+      e.preventDefault();
+
+      if (viewMode === 'single' && !e.shiftKey) {
+        // 単一表示モードでは矢印キーでページ送り
+        setCurrentPage(prev => {
+          const next = isNext ? Math.min(prev + 1, totalPages - 1) : Math.max(prev - 1, 0);
+          return next;
+        });
+        return;
+      }
+
+      // 基準点を決定
+      const anchor = lastClickedRef.current ?? (selectedPages.size > 0 ? Math.min(...selectedPages) : 0);
+      const nextIdx = isNext ? Math.min(anchor + 1, totalPages - 1) : Math.max(anchor - 1, 0);
+
+      if (e.shiftKey) {
+        // Shift+矢印: 選択範囲を拡張
+        setSelectedPages(prev => {
+          const next = new Set(prev);
+          next.add(nextIdx);
+          lastClickedRef.current = nextIdx;
+          return next;
+        });
+        // グリッドモードの場合はスクロールで見えるようにする
+        if (viewMode === 'grid') {
+          setTimeout(() => {
+            const thumb = el.querySelector(`[data-page-index="${nextIdx}"]`);
+            thumb?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }, 0);
+        }
+      } else {
+        // 矢印のみ（グリッドモード）: 単一選択を移動
+        lastClickedRef.current = nextIdx;
+        setSelectedPages(new Set([nextIdx]));
+        if (viewMode === 'grid') {
+          setTimeout(() => {
+            const thumb = el.querySelector(`[data-page-index="${nextIdx}"]`);
+            thumb?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }, 0);
+        }
+      }
+    };
+    el.addEventListener('keydown', handler);
+    return () => el.removeEventListener('keydown', handler);
+  }, [stampEditing, totalPages, selectedPages, viewMode]);
+
   const selectAll = useCallback(() => {
-    const all = new Set(Array.from({ length: totalPages }, (_, i) => i));
-    setSelectedPages(all);
+    setSelectedPages(new Set(Array.from({ length: totalPages }, (_, i) => i)));
   }, [totalPages]);
 
   const deselectAll = useCallback(() => {
@@ -315,7 +376,6 @@ export default function PdfPreviewPanel({
     const newIndex = parseInt(String(over.id).replace('page-', ''), 10);
     if (isNaN(oldIndex) || isNaN(newIndex)) return;
 
-    // 新しい順序を構築
     const order = Array.from({ length: totalPages }, (_, i) => i);
     const reordered = arrayMove(order, oldIndex, newIndex);
 
@@ -323,7 +383,6 @@ export default function PdfPreviewPanel({
     setEditProcessing(true);
     try {
       const newFile = await reorderPages(file, reordered);
-      // 選択状態を新しいインデックスにマッピング
       const indexMap = new Map<number, number>();
       reordered.forEach((origIdx, newIdx) => indexMap.set(origIdx, newIdx));
       setSelectedPages(prev => {
@@ -349,8 +408,74 @@ export default function PdfPreviewPanel({
       ? `p.${selectedArr.map(i => i + 1).join(', ')}`
       : `${selectedPages.size}ページ`;
 
+  // ── スタンプオーバーレイ（1ページ目用） ──
+  const renderStampOverlay = (pageIndex: number) => {
+    if (pageIndex !== 0) return null;
+    if (!stampImageUrl || firstPageRect.w <= 0) return null;
+    return (
+      <img
+        src={stampImageUrl}
+        alt={label}
+        className={`absolute pointer-events-none ${stampEditing ? 'ring-2 ring-orange-400 ring-offset-1 rounded-sm' : ''}`}
+        style={{
+          left: Math.max(0, stampLeft),
+          top: Math.max(0, stampTop),
+          width: stampPx.w * scale,
+          height: stampPx.h * scale,
+        }}
+      />
+    );
+  };
+
+  // ── ページサムネイル（共通コンポーネント） ──
+  const renderPageThumb = (i: number, dataUrl: string, isGrid: boolean) => {
+    const isSelected = selectedPages.has(i);
+    const isFirstPage = i === 0;
+    return (
+      <div
+        data-page-index={i}
+        className={`relative cursor-pointer group rounded-md overflow-hidden transition-all select-none ${
+          isSelected
+            ? 'ring-3 ring-blue-500 ring-offset-1'
+            : 'hover:ring-2 hover:ring-blue-200 hover:ring-offset-1'
+        }`}
+        onClick={(e) => {
+          handlePageClick(i, e);
+          if (viewMode === 'single') setCurrentPage(i);
+        }}
+      >
+        {isFirstPage ? (
+          <div
+            ref={firstPageRef}
+            className={`relative ${stampEditing ? 'cursor-crosshair' : ''}`}
+            onMouseDown={handleMouseDown}
+          >
+            <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
+            {renderStampOverlay(i)}
+          </div>
+        ) : (
+          <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
+        )}
+
+        {/* ページ番号バッジ */}
+        <div className={`absolute bottom-1 left-1 bg-black/60 text-white px-1.5 py-0.5 rounded-full leading-none ${isGrid ? 'text-[9px]' : 'text-[11px]'}`}>
+          {i + 1} / {totalPages}
+        </div>
+
+        {/* 選択チェックマーク */}
+        {isSelected && (
+          <div className={`absolute top-1 right-1 bg-blue-600 rounded-full flex items-center justify-center shadow ${isGrid ? 'w-5 h-5' : 'w-6 h-6'}`}>
+            <svg className={`text-white ${isGrid ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="h-full flex flex-col bg-white">
+    <div className="h-full flex flex-col bg-white" ref={panelRef} tabIndex={0} style={{ outline: 'none' }}>
       {/* ヘッダー */}
       <div className="shrink-0 px-4 py-2.5 border-b border-gray-200 flex items-center gap-2">
         <div className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
@@ -359,6 +484,25 @@ export default function PdfPreviewPanel({
         <div className="flex-1 min-w-0 text-sm text-gray-700 font-medium truncate" title={file.name}>
           {displayName}
         </div>
+
+        {/* 表示切替ボタン */}
+        <div className="flex border border-gray-200 rounded overflow-hidden shrink-0">
+          <button
+            onClick={() => setViewMode('single')}
+            className={`px-2 py-1 text-[10px] font-medium ${viewMode === 'single' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+            title="単一ページ表示"
+          >
+            1枚
+          </button>
+          <button
+            onClick={() => setViewMode('grid')}
+            className={`px-2 py-1 text-[10px] font-medium ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+            title="一覧表示（並び替え・複数選択）"
+          >
+            一覧
+          </button>
+        </div>
+
         <button
           onClick={onClose}
           className="shrink-0 w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-base font-bold"
@@ -374,7 +518,7 @@ export default function PdfPreviewPanel({
         <div className="px-4 py-1.5 flex items-center gap-2 flex-wrap">
           {!stampEditing ? (
             <button
-              onClick={() => { setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); }}
+              onClick={() => { setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); if (viewMode === 'single') setCurrentPage(0); }}
               className="text-xs text-orange-600 hover:text-orange-800 border border-orange-200 rounded px-2.5 py-1 hover:bg-orange-50 font-medium"
             >
               📍 スタンプ位置
@@ -410,14 +554,15 @@ export default function PdfPreviewPanel({
         {/* ページ編集ツールバー */}
         {!stampEditing && (
           <div className="px-4 py-1.5 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-            {/* 選択操作 */}
-            <button
-              onClick={selectedPages.size === totalPages ? deselectAll : selectAll}
-              disabled={totalPages === 0}
-              className="text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100 disabled:opacity-40"
-            >
-              {selectedPages.size === totalPages ? '選択解除' : '全選択'}
-            </button>
+            {viewMode === 'grid' && (
+              <button
+                onClick={selectedPages.size === totalPages ? deselectAll : selectAll}
+                disabled={totalPages === 0}
+                className="text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100 disabled:opacity-40"
+              >
+                {selectedPages.size === totalPages ? '選択解除' : '全選択'}
+              </button>
+            )}
 
             {selectedPages.size > 0 && (
               <>
@@ -467,7 +612,11 @@ export default function PdfPreviewPanel({
               </>
             )}
             {selectedPages.size === 0 && (
-              <span className="text-[10px] text-gray-400">クリックで選択 / Ctrl+クリックで複数選択 / ドラッグで並び替え</span>
+              <span className="text-[10px] text-gray-400">
+                {viewMode === 'grid'
+                  ? 'クリックで選択 / Ctrl+クリック・Shift+矢印で複数選択 / ドラッグで並び替え'
+                  : '← → でページ送り / クリックで選択して編集'}
+              </span>
             )}
           </div>
         )}
@@ -510,7 +659,7 @@ export default function PdfPreviewPanel({
         </div>
       )}
 
-      {/* プレビュー本体（グリッド + スクロール封じ込め） */}
+      {/* プレビュー本体 */}
       <div className="flex-1 overflow-y-auto overscroll-y-contain bg-gray-100 relative">
         {/* 処理中オーバーレイ */}
         {editProcessing && (
@@ -527,7 +676,36 @@ export default function PdfPreviewPanel({
             <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
             <p className="text-sm text-gray-500">読み込み中...</p>
           </div>
+        ) : viewMode === 'single' ? (
+          /* ── 単一ページ表示 ── */
+          <div className="p-4">
+            {pages[currentPage] && renderPageThumb(currentPage, pages[currentPage], false)}
+
+            {/* ページ送りコントロール */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-3 mt-3">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                  disabled={currentPage <= 0}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                >
+                  ‹
+                </button>
+                <span className="text-sm text-gray-600 font-medium min-w-[80px] text-center">
+                  {currentPage + 1} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                  disabled={currentPage >= totalPages - 1}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
+          /* ── グリッド表示（ドラッグ＆ドロップ対応） ── */
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -539,65 +717,14 @@ export default function PdfPreviewPanel({
                 className="p-3 grid gap-2"
                 style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}
               >
-                {pages.map((dataUrl, i) => {
-                  const isSelected = selectedPages.has(i);
-                  return (
-                    <SortablePageThumb key={pageIds[i]} id={pageIds[i]} disabled={stampEditing}>
-                      <div
-                        className={`relative cursor-pointer group rounded-md overflow-hidden transition-all select-none ${
-                          isSelected
-                            ? 'ring-3 ring-blue-500 ring-offset-1'
-                            : 'hover:ring-2 hover:ring-blue-200 hover:ring-offset-1'
-                        }`}
-                        onClick={(e) => handlePageClick(i, e)}
-                      >
-                        {/* 1ページ目: スタンプオーバーレイ付き */}
-                        {i === 0 ? (
-                          <div
-                            ref={firstPageRef}
-                            className={`relative ${stampEditing ? 'cursor-crosshair' : ''}`}
-                            onMouseDown={handleMouseDown}
-                          >
-                            <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
-                            {stampImageUrl && firstPageRect.w > 0 && (
-                              <img
-                                src={stampImageUrl}
-                                alt={label}
-                                className={`absolute pointer-events-none ${stampEditing ? 'ring-2 ring-orange-400 ring-offset-1 rounded-sm' : ''}`}
-                                style={{
-                                  left: Math.max(0, stampLeft),
-                                  top: Math.max(0, stampTop),
-                                  width: stampPx.w * scale,
-                                  height: stampPx.h * scale,
-                                }}
-                              />
-                            )}
-                          </div>
-                        ) : (
-                          <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
-                        )}
-
-                        {/* ページ番号バッジ */}
-                        <div className="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded-full leading-none">
-                          {i + 1}
-                        </div>
-
-                        {/* 選択チェックマーク */}
-                        {isSelected && (
-                          <div className="absolute top-1 right-1 w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center shadow">
-                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                    </SortablePageThumb>
-                  );
-                })}
+                {pages.map((dataUrl, i) => (
+                  <SortablePageThumb key={pageIds[i]} id={pageIds[i]} disabled={stampEditing}>
+                    {renderPageThumb(i, dataUrl, true)}
+                  </SortablePageThumb>
+                ))}
               </div>
             </SortableContext>
 
-            {/* ドラッグオーバーレイ */}
             <DragOverlay>
               {draggingPageId != null ? (() => {
                 const idx = parseInt(draggingPageId.replace('page-', ''), 10);
