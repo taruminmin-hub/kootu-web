@@ -26,7 +26,7 @@ export type FileNameJoinFormat =
   | 'paren-half'   // (甲001)書類名.pdf
   | 'custom';
 
-export type StampColor = 'red' | 'blue' | 'black';
+export type StampColor = 'red' | 'blue' | 'green' | 'black';
 
 export interface StampPosition {
   /** PDF 右端からの距離 (pt) */

@@ -41,60 +41,64 @@ export async function processAllFiles(
 
     if ((group.mergeBranches ?? settings.mergeBranches) && hasBranches) {
       // ── 枝番ファイルを結合して1ファイルに ──
-      const merged = await PDFDocument.create();
-      const allEntries = [group.mainFile, ...group.branchFiles];
+      try {
+        const merged = await PDFDocument.create();
+        const allEntries = [group.mainFile, ...group.branchFiles];
 
-      for (let j = 0; j < allEntries.length; j++) {
-        const entry = allEntries[j];
-        const branchNum = hasBranches ? j + 1 : null;
-        const stampText = generateStampText(sym, mainNum, branchNum, settings.stampFormat, nl);
+        for (let j = 0; j < allEntries.length; j++) {
+          const entry = allEntries[j];
+          const branchNum = hasBranches ? j + 1 : null;
+          const stampText = generateStampText(sym, mainNum, branchNum, settings.stampFormat, nl);
 
-        const srcBytes = await entry.file.arrayBuffer();
-        let srcDoc: PDFDocument;
-        try {
-          srcDoc = await PDFDocument.load(srcBytes);
-        } catch {
+          const srcBytes = await entry.file.arrayBuffer();
+          let srcDoc: PDFDocument;
           try {
-            srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
-            warnings.push(`"${entry.file.name}" は暗号化されています。スタンプが正しく適用されない場合があります。`);
+            srcDoc = await PDFDocument.load(srcBytes);
           } catch {
-            throw new Error(`"${entry.file.name}" を開けませんでした。暗号化または破損している可能性があります。`);
+            try {
+              srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+              warnings.push(`"${entry.file.name}" は暗号化されています。スタンプが正しく適用されない場合があります。`);
+            } catch {
+              throw new Error(`"${entry.file.name}" を開けませんでした。暗号化または破損している可能性があります。`);
+            }
           }
+          srcDoc = await physicallyRotateDoc(srcDoc, entry.rotation);
+          const copied = await merged.copyPages(srcDoc, srcDoc.getPageIndices());
+
+          const imgBytes = await createStampImage(
+            stampText, settings.fontSize, settings.color,
+            settings.whiteBackground, settings.border,
+          );
+          const img = await merged.embedPng(imgBytes);
+          const { width: iw, height: ih } = img.size();
+          const displayW = iw / 3;
+          const displayH = ih / 3;
+
+          const firstPage = copied[0];
+          const { width: pw, height: ph } = firstPage.getSize();
+          const mRight = entry.customStampPosition?.marginRight ?? settings.marginRight;
+          const mTop = entry.customStampPosition?.marginTop ?? settings.marginTop;
+          firstPage.drawImage(img, {
+            x: pw - displayW - mRight,
+            y: ph - displayH - mTop,
+            width: displayW,
+            height: displayH,
+          });
+          for (const page of copied) merged.addPage(page);
         }
-        srcDoc = await physicallyRotateDoc(srcDoc, entry.rotation);
-        const copied = await merged.copyPages(srcDoc, srcDoc.getPageIndices());
 
-        const imgBytes = await createStampImage(
-          stampText, settings.fontSize, settings.color,
-          settings.whiteBackground, settings.border,
-        );
-        const img = await merged.embedPng(imgBytes);
-        const { width: iw, height: ih } = img.size();
-        const displayW = iw / 3;
-        const displayH = ih / 3;
+        // ページ番号（全ページ）
+        if (settings.pageNumberEnabled) {
+          await addPageNumbers(merged, merged.getPages(), settings);
+        }
 
-        const firstPage = copied[0];
-        const { width: pw, height: ph } = firstPage.getSize();
-        const mRight = entry.customStampPosition?.marginRight ?? settings.marginRight;
-        const mTop = entry.customStampPosition?.marginTop ?? settings.marginTop;
-        firstPage.drawImage(img, {
-          x: pw - displayW - mRight,
-          y: ph - displayH - mTop,
-          width: displayW,
-          height: displayH,
-        });
-        for (const page of copied) merged.addPage(page);
+        const pdfBytes = await merged.save();
+        const numText = generateFileNameNumber(sym, mainNum, null, settings.fileNameNumberFormat, nl);
+        const base = resolveOutputBaseName(group.mainFile);
+        results.push({ name: buildFileName(numText, base, settings.fileNameJoinFormat, settings.customFileNameFormat), data: pdfBytes });
+      } catch (err) {
+        warnings.push(`結合グループ "${group.mainFile.file.name}" の処理に失敗しました: ${err instanceof Error ? err.message : '不明なエラー'}`);
       }
-
-      // ページ番号（全ページ）
-      if (settings.pageNumberEnabled) {
-        await addPageNumbers(merged, merged.getPages(), settings);
-      }
-
-      const pdfBytes = await merged.save();
-      const numText = generateFileNameNumber(sym, mainNum, null, settings.fileNameNumberFormat, nl);
-      const base = resolveOutputBaseName(group.mainFile);
-      results.push({ name: buildFileName(numText, base, settings.fileNameJoinFormat, settings.customFileNameFormat), data: pdfBytes });
 
       current++;
       onProgress(current, total);
@@ -105,14 +109,18 @@ export async function processAllFiles(
         : [{ entry: group.mainFile, branchNum: null as null }];
 
       for (const { entry, branchNum } of allEntries) {
-        const stampText = generateStampText(sym, mainNum, branchNum, settings.stampFormat, nl);
-        const numText = generateFileNameNumber(sym, mainNum, branchNum, settings.fileNameNumberFormat, nl);
-        const effectiveSettings = entry.customStampPosition
-          ? { ...settings, marginRight: entry.customStampPosition.marginRight, marginTop: entry.customStampPosition.marginTop }
-          : settings;
-        const pdfBytes = await stampSinglePdf(entry.file, stampText, effectiveSettings, entry.rotation, warnings);
-        const base = resolveOutputBaseName(entry);
-        results.push({ name: buildFileName(numText, base, settings.fileNameJoinFormat, settings.customFileNameFormat), data: pdfBytes });
+        try {
+          const stampText = generateStampText(sym, mainNum, branchNum, settings.stampFormat, nl);
+          const numText = generateFileNameNumber(sym, mainNum, branchNum, settings.fileNameNumberFormat, nl);
+          const effectiveSettings = entry.customStampPosition
+            ? { ...settings, marginRight: entry.customStampPosition.marginRight, marginTop: entry.customStampPosition.marginTop }
+            : settings;
+          const pdfBytes = await stampSinglePdf(entry.file, stampText, effectiveSettings, entry.rotation, warnings);
+          const base = resolveOutputBaseName(entry);
+          results.push({ name: buildFileName(numText, base, settings.fileNameJoinFormat, settings.customFileNameFormat), data: pdfBytes });
+        } catch (err) {
+          warnings.push(`"${entry.file.name}" の処理に失敗しました: ${err instanceof Error ? err.message : '不明なエラー'}`);
+        }
 
         current++;
         onProgress(current, total);
@@ -305,7 +313,19 @@ export function computeOutputFileNames(groups: FileGroup[], settings: Settings):
 
 export async function downloadAsZip(files: OutputFile[]): Promise<void> {
   const zip = new JSZip();
-  for (const f of files) zip.file(f.name, f.data);
+  const usedNames = new Map<string, number>();
+  for (const f of files) {
+    let name = f.name;
+    const count = usedNames.get(name) ?? 0;
+    if (count > 0) {
+      const ext = name.lastIndexOf('.');
+      const base = ext >= 0 ? name.slice(0, ext) : name;
+      const suffix = ext >= 0 ? name.slice(ext) : '';
+      name = `${base} (${count})${suffix}`;
+    }
+    usedNames.set(f.name, count + 1);
+    zip.file(name, f.data);
+  }
   const blob = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

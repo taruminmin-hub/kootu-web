@@ -21,11 +21,12 @@ function downloadOne(file: OutputFile) {
 
 export default function ResultModal({ results, warnings, onDownloadZip, onClose }: Props) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      role="dialog" aria-modal="true" aria-label="処理完了">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
         <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
           <h2 className="text-sm font-bold text-gray-800">処理完了</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl" aria-label="閉じる">✕</button>
         </div>
 
         <p className="px-6 pt-3 pb-1 text-xs text-gray-500 shrink-0">

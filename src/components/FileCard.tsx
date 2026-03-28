@@ -126,11 +126,20 @@ export default function FileCard({
             </div>
           )}
 
-          {/* ホバー時のプレビューオーバーレイ */}
+          {/* ホバー時のアクションオーバーレイ */}
           {!selectionMode && (
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-all pointer-events-none">
-              <span className="text-white text-xs font-medium bg-black/60 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                🔍 プレビュー
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex flex-col items-center justify-center gap-1 transition-all pointer-events-none">
+              <span
+                className="text-white text-xs font-medium bg-black/60 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto cursor-pointer hover:bg-black/80"
+                onClick={(e) => { e.stopPropagation(); onPreviewSelect?.(); }}
+              >
+                プレビュー
+              </span>
+              <span
+                className="text-white text-[10px] bg-black/50 px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto cursor-pointer hover:bg-black/70"
+                onClick={(e) => { e.stopPropagation(); setShowPdfEdit(true); }}
+              >
+                ページ編集
               </span>
             </div>
           )}
@@ -198,7 +207,8 @@ export default function FileCard({
               className={`text-xs leading-tight cursor-text ${
                 customOutputName?.trim() ? 'text-blue-700 font-medium' : 'text-gray-600'
               }`}
-              title={`ダブルクリックで出力ファイル名を編集\n元ファイル: ${file.name}`}
+              title={`クリックで出力ファイル名を編集\n元ファイル: ${file.name}`}
+              onClick={startEdit}
               onDoubleClick={startEdit}
             >
               {shortName}

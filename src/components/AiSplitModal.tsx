@@ -255,9 +255,9 @@ export default function AiSplitModal({ file, onComplete, onClose }: Props) {
                       <span className="text-gray-400">p.{seg.startPage + 1}-{seg.endPage + 1}</span>
                       {segments.length > 1 && (
                         <button
-                          onClick={() => removeSplitPoint(Math.max(0, i - 1))}
+                          onClick={() => removeSplitPoint(i > 0 ? i - 1 : 0)}
                           className="text-gray-400 hover:text-red-500 ml-0.5"
-                          title={i > 0 ? `前のセグメントと結合` : '次のセグメントと結合'}
+                          title={i > 0 ? '前のセグメントと結合' : '次のセグメントと結合'}
                         >
                           ✕
                         </button>

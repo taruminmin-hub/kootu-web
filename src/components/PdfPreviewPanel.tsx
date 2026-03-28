@@ -182,7 +182,7 @@ export default function PdfPreviewPanel({
         </button>
         <button
           onClick={onClose}
-          className="shrink-0 w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded text-sm"
+          className="shrink-0 w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-base font-bold"
           title="プレビューを閉じる"
         >
           ✕
@@ -204,7 +204,7 @@ export default function PdfPreviewPanel({
             <span className="text-[10px] text-gray-400">— 1ページ目をクリック/ドラッグ</span>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="text-[10px] text-gray-500">
-                上: {pos.marginTop}pt / 右: {pos.marginRight}pt
+                上: {pos.marginTop}pt ({(pos.marginTop * 0.3528).toFixed(1)}mm) / 右: {pos.marginRight}pt ({(pos.marginRight * 0.3528).toFixed(1)}mm)
               </span>
               <button
                 onClick={handleResetPos}

@@ -71,12 +71,21 @@ export function generateFileNameNumber(
 // ─── Canvas スタンプ画像生成 ──────────────────────────────────
 
 function colorToHex(color: StampColor): string {
-  return color === 'red' ? '#CC0000' : color === 'blue' ? '#0055CC' : '#000000';
+  return color === 'red' ? '#CC0000' : color === 'blue' ? '#0055CC' : color === 'green' ? '#007733' : '#000000';
+}
+
+/** スタンプ画像のキャッシュ（同じパラメータで再生成を防止） */
+const stampCache = new Map<string, Uint8Array>();
+
+/** キャッシュをクリアする（設定変更時などに呼ぶ） */
+export function clearStampCache(): void {
+  stampCache.clear();
 }
 
 /**
  * Canvas API でスタンプ画像 (PNG) を生成する
  * フォントは CSS で読み込み済みの "Noto Serif JP" を使用
+ * 同じパラメータの場合はキャッシュを返す
  */
 export async function createStampImage(
   text: string,
@@ -85,6 +94,9 @@ export async function createStampImage(
   withBackground: boolean,
   withBorder: boolean,
 ): Promise<Uint8Array> {
+  const cacheKey = `${text}|${fontSize}|${color}|${withBackground}|${withBorder}`;
+  const cached = stampCache.get(cacheKey);
+  if (cached) return cached;
   // フォントがロード済みであることを保証する
   await document.fonts.load(`bold ${fontSize * 3}px "Noto Serif JP"`);
 
@@ -119,10 +131,12 @@ export async function createStampImage(
   ctx.textBaseline = 'top';
   ctx.fillText(text, pad, pad);
 
-  return new Promise((resolve, reject) => {
+  const result = await new Promise<Uint8Array>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (!blob) { reject(new Error('Canvas → Blob 変換失敗')); return; }
       blob.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)));
     }, 'image/png');
   });
+  stampCache.set(cacheKey, result);
+  return result;
 }

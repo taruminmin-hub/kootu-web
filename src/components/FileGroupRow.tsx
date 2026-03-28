@@ -38,10 +38,13 @@ function SortableBranchItem({ id, children }: { id: string; children: React.Reac
       <div
         {...attributes}
         {...listeners}
-        className="h-3.5 mb-0.5 flex items-center justify-center cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 bg-gray-100 hover:bg-gray-200 rounded text-xs select-none"
+        className="h-4 mb-0.5 flex items-center justify-center cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 bg-gray-100 hover:bg-gray-200 rounded select-none"
         title="ドラッグで順序変更"
       >
-        ⠿
+        <svg className="w-4 h-3" viewBox="0 0 16 12" fill="currentColor">
+          <circle cx="5" cy="3" r="1.2" /><circle cx="11" cy="3" r="1.2" />
+          <circle cx="5" cy="9" r="1.2" /><circle cx="11" cy="9" r="1.2" />
+        </svg>
       </div>
       {children}
     </div>
@@ -128,10 +131,14 @@ export default function FileGroupRow({
         <div
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 text-lg select-none"
+          className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded p-1 select-none"
           title="ドラッグで並び替え"
         >
-          ⠿
+          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+            <circle cx="7" cy="4" r="1.5" /><circle cx="13" cy="4" r="1.5" />
+            <circle cx="7" cy="10" r="1.5" /><circle cx="13" cy="10" r="1.5" />
+            <circle cx="7" cy="16" r="1.5" /><circle cx="13" cy="16" r="1.5" />
+          </svg>
         </div>
         <div className="w-10 h-10 rounded-full bg-white border-2 border-gray-300 flex items-center justify-center text-sm font-bold text-gray-700">
           {nl ? sym : mainNum}

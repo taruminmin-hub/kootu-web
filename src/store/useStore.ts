@@ -24,15 +24,37 @@ const defaultSettings: Settings = {
   mergeBranches: false,
 };
 
-const SETTINGS_VERSION = 1;
+const SETTINGS_VERSION = 2;
+
+/** バージョンごとのマイグレーション関数 */
+const migrations: Record<number, (data: Record<string, unknown>) => Record<string, unknown>> = {
+  // v1 → v2: green を color に追加（型変更のみ、データは互換）
+  2: (data) => data,
+};
+
+function migrateSettings(data: Record<string, unknown>, fromVersion: number): Record<string, unknown> {
+  let current = data;
+  for (let v = fromVersion + 1; v <= SETTINGS_VERSION; v++) {
+    if (migrations[v]) current = migrations[v](current);
+  }
+  return current;
+}
 
 function loadSettings(): Settings {
   try {
     const saved = localStorage.getItem('kootu-settings');
     if (saved) {
       const parsed = JSON.parse(saved);
-      // バージョンが一致しない場合はデフォルトにリセットして破損を防ぐ
-      if (parsed.__version !== SETTINGS_VERSION) return defaultSettings;
+      const version = parsed.__version ?? 0;
+      if (version < SETTINGS_VERSION) {
+        // マイグレーションして保存し直す
+        const migrated = migrateSettings(parsed, version);
+        const result = { ...defaultSettings, ...migrated };
+        try {
+          localStorage.setItem('kootu-settings', JSON.stringify({ ...result, __version: SETTINGS_VERSION }));
+        } catch { /* ignore */ }
+        return result as Settings;
+      }
       return { ...defaultSettings, ...parsed };
     }
   } catch { /* ignore */ }
@@ -43,9 +65,17 @@ function genId(): string {
   return crypto.randomUUID();
 }
 
+interface UndoSnapshot {
+  groups: FileGroup[];
+  label: string;
+  timestamp: number;
+}
+
 interface AppState {
   groups: FileGroup[];
   settings: Settings;
+  /** 直前の削除操作を元に戻すためのスナップショット */
+  undoSnapshot: UndoSnapshot | null;
 
   addFiles: (files: Array<{ file: File; rotation?: 0 | 90 | 180 | 270 }>) => void;
   setRotation: (groupId: string, fileId: string, rotation: 0 | 90 | 180 | 270) => void;
@@ -75,11 +105,16 @@ interface AppState {
   addFilesFromSplit: (files: Array<{ file: File; suggestedName: string }>) => void;
   /** 複数ファイルの出力名を一括で更新する */
   batchRename: (updates: Array<{ groupId: string; fileId: string; name: string }>) => void;
+  /** 直前の削除操作を元に戻す */
+  undo: () => void;
+  /** Undoスナップショットをクリアする */
+  clearUndo: () => void;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   groups: [],
   settings: loadSettings(),
+  undoSnapshot: null,
 
   addFiles: (files) =>
     set((s) => ({
@@ -110,7 +145,10 @@ export const useStore = create<AppState>((set) => ({
     })),
 
   removeGroup: (groupId) =>
-    set((s) => ({ groups: s.groups.filter((g) => g.id !== groupId) })),
+    set((s) => ({
+      groups: s.groups.filter((g) => g.id !== groupId),
+      undoSnapshot: { groups: s.groups, label: 'グループを削除', timestamp: Date.now() },
+    })),
 
   removeBranch: (groupId, fileId) =>
     set((s) => ({
@@ -119,6 +157,7 @@ export const useStore = create<AppState>((set) => ({
           ? { ...g, branchFiles: g.branchFiles.filter((f) => f.id !== fileId) }
           : g,
       ),
+      undoSnapshot: { groups: s.groups, label: '枝番を削除', timestamp: Date.now() },
     })),
 
   moveGroupUp: (groupId) =>
@@ -225,7 +264,10 @@ export const useStore = create<AppState>((set) => ({
       }),
     })),
 
-  clearAll: () => set({ groups: [] }),
+  clearAll: () => set((s) => ({
+    groups: [],
+    undoSnapshot: { groups: s.groups, label: 'リストクリア', timestamp: Date.now() },
+  })),
 
   toggleMergeBranches: (groupId) =>
     set((s) => ({
@@ -288,7 +330,10 @@ export const useStore = create<AppState>((set) => ({
           newGroups.push({ ...g, branchFiles: survivingBranches });
         }
       }
-      return { groups: newGroups };
+      return {
+        groups: newGroups,
+        undoSnapshot: { groups: s.groups, label: `${fileIds.length}件を削除`, timestamp: Date.now() },
+      };
     }),
 
   replaceFile: (groupId, fileId, newFile) =>
@@ -380,4 +425,13 @@ export const useStore = create<AppState>((set) => ({
         }),
       };
     }),
+
+  undo: () => {
+    const snapshot = get().undoSnapshot;
+    if (snapshot) {
+      set({ groups: snapshot.groups, undoSnapshot: null });
+    }
+  },
+
+  clearUndo: () => set({ undoSnapshot: null }),
 }));

@@ -43,7 +43,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function App() {
-  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles, moveGroupAsBranch, addFilesFromSplit, batchRename } = useStore();
+  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles, moveGroupAsBranch, addFilesFromSplit, batchRename, undoSnapshot, undo, clearUndo } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [converting, setConverting] = useState(false);
@@ -67,9 +67,17 @@ export default function App() {
     rotation: 0 | 90 | 180 | 270;
   } | null>(null);
   const [showPdfEditFromPreview, setShowPdfEditFromPreview] = useState(false);
+  const [mainAreaDragOver, setMainAreaDragOver] = useState(false);
 
   // カスタム符号が空の場合に処理を無効化
   const isCustomSymbolEmpty = settings.symbol === 'custom' && !settings.customSymbol.trim();
+
+  // Undo スナックバーの自動非表示（8秒後）
+  useEffect(() => {
+    if (!undoSnapshot) return;
+    const timer = setTimeout(() => clearUndo(), 8000);
+    return () => clearTimeout(timer);
+  }, [undoSnapshot, clearUndo]);
 
   // Google Fonts を Canvas で使えるよう preload
   useEffect(() => {
@@ -230,7 +238,7 @@ export default function App() {
         </button>
         <h1 className="text-base font-bold text-gray-800 shrink-0">証拠番号付与アプリ</h1>
 
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="hidden md:flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600 shrink-0">符号:</label>
             <select
@@ -295,6 +303,51 @@ export default function App() {
         <aside className={`w-52 bg-white border-r border-gray-200 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto transition-transform z-40 ${
           sidebarOpen ? 'fixed inset-y-0 left-0 top-[53px] translate-x-0 shadow-xl' : 'hidden md:flex'
         }`}>
+          {/* モバイル: 符号・開始番号設定 */}
+          <div className="md:hidden space-y-2 pb-3 border-b border-gray-200">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-600 shrink-0">符号:</label>
+              <select
+                value={settings.symbol}
+                onChange={(e) => updateSettings({ symbol: e.target.value as SymbolType })}
+                className="border border-gray-300 rounded px-1.5 py-1 text-xs bg-white flex-1"
+              >
+                {SYMBOLS.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            {settings.symbol === 'custom' && (
+              <input
+                type="text"
+                value={settings.customSymbol}
+                onChange={(e) => updateSettings({ customSymbol: e.target.value })}
+                placeholder="例: 参"
+                className="border border-gray-300 rounded px-1.5 py-1 text-xs w-full"
+              />
+            )}
+            <div className={`flex items-center gap-2 transition-opacity ${settings.numberless ? 'opacity-40 pointer-events-none' : ''}`}>
+              <label className="text-xs text-gray-600 shrink-0">開始番号:</label>
+              <input
+                type="number"
+                min={1}
+                value={settings.startNumber}
+                onChange={(e) => updateSettings({ startNumber: Math.max(1, parseInt(e.target.value) || 1) })}
+                className="border border-gray-300 rounded px-1.5 py-1 text-xs w-14 text-center"
+              />
+            </div>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.numberless}
+                onChange={(e) => updateSettings({ numberless: e.target.checked })}
+                className="accent-blue-600 w-3.5 h-3.5"
+              />
+              <span className="text-xs text-gray-600">番号なし</span>
+            </label>
+          </div>
+
+          {/* ── 主要アクション ── */}
           <button
             onClick={openFilePicker}
             className="bg-blue-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-2"
@@ -305,10 +358,10 @@ export default function App() {
           <button
             onClick={handleProcessClick}
             disabled={!groups.length || processing || isCustomSymbolEmpty}
-            className="bg-green-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="bg-green-600 text-white rounded-lg px-4 py-3 text-sm font-bold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm ring-1 ring-green-700/10"
             title={isCustomSymbolEmpty ? 'カスタム符号を入力してください' : undefined}
           >
-            📋 PDFにスタンプ付与
+            📋 スタンプ付与
           </button>
           {isCustomSymbolEmpty && (
             <p className="text-xs text-red-500">カスタム符号が未入力です</p>
@@ -316,9 +369,11 @@ export default function App() {
 
           <hr className="border-gray-200" />
 
+          {/* ── AI ツール ── */}
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">AI ツール</p>
           <button
             onClick={openAiSplitPicker}
-            className="bg-purple-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-purple-700 flex items-center justify-center gap-2"
+            className="bg-purple-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-700 flex items-center justify-center gap-2"
           >
             🤖 AI分割
           </button>
@@ -326,28 +381,30 @@ export default function App() {
           <button
             onClick={() => setShowAiName(true)}
             disabled={!groups.length}
-            className="border border-purple-300 text-purple-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="border border-purple-300 text-purple-700 rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
             🤖 AI名前提案
           </button>
 
           <hr className="border-gray-200" />
 
-          <button
-            onClick={() => setShowClearConfirm(true)}
-            disabled={!groups.length}
-            className="border border-gray-300 rounded-lg px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            リストクリア
-          </button>
-
-          {/* 選択モードボタン */}
-          <button
-            onClick={() => { setSelectionMode((m) => !m); setSelectedIds(new Set()); }}
-            className={`border rounded-lg px-4 py-2 text-sm ${selectionMode ? 'bg-blue-50 border-blue-400 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`}
-          >
-            {selectionMode ? '選択中...' : '選択削除'}
-          </button>
+          {/* ── 管理 ── */}
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">管理</p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              disabled={!groups.length}
+              className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              クリア
+            </button>
+            <button
+              onClick={() => { setSelectionMode((m) => !m); setSelectedIds(new Set()); }}
+              className={`flex-1 border rounded-lg px-2 py-1.5 text-xs ${selectionMode ? 'bg-blue-50 border-blue-400 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`}
+            >
+              {selectionMode ? '選択中...' : '選択削除'}
+            </button>
+          </div>
           {selectionMode && selectedIds.size > 0 && (
             <button
               onClick={handleDeleteSelected}
@@ -380,9 +437,36 @@ export default function App() {
         {/* ── メインエリア（ファイル一覧 + プレビュー分割） ── */}
         <div className="flex flex-1 overflow-hidden">
           {/* 左: ファイル一覧 */}
-          <main className={`p-4 overflow-y-auto transition-all ${
-            previewFile ? 'w-1/2 lg:w-[45%]' : 'flex-1'
-          }`}>
+          <main
+            className={`p-4 overflow-y-auto transition-all relative ${
+              previewFile ? 'w-1/2 lg:w-[45%]' : 'flex-1'
+            }`}
+            onDragOver={(e) => {
+              if (groups.length > 0 && e.dataTransfer.types.includes('Files')) {
+                e.preventDefault();
+                setMainAreaDragOver(true);
+              }
+            }}
+            onDragLeave={(e) => {
+              if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) {
+                setMainAreaDragOver(false);
+              }
+            }}
+            onDrop={(e) => {
+              if (groups.length > 0 && e.dataTransfer.files.length > 0) {
+                e.preventDefault();
+                setMainAreaDragOver(false);
+                const files = Array.from(e.dataTransfer.files);
+                handleAddFiles(files);
+              }
+            }}
+          >
+            {/* ドラッグ中のオーバーレイ */}
+            {mainAreaDragOver && groups.length > 0 && (
+              <div className="absolute inset-0 bg-blue-50/80 border-2 border-dashed border-blue-400 rounded-xl z-20 flex items-center justify-center pointer-events-none">
+                <p className="text-blue-600 font-medium text-sm">ファイルをドロップして追加</p>
+              </div>
+            )}
             {groups.length === 0 ? (
               <DropZone onDrop={handleAddFiles} />
             ) : (
@@ -438,7 +522,7 @@ export default function App() {
             )}
           </main>
 
-          {/* 右: PDFプレビューパネル */}
+          {/* 右: PDFプレビューパネル（デスクトップ: サイドパネル） */}
           {previewFile && (
             <aside className="w-1/2 lg:w-[55%] border-l border-gray-200 bg-white hidden md:block">
               <PdfPreviewPanel
@@ -463,6 +547,32 @@ export default function App() {
                 }}
               />
             </aside>
+          )}
+          {/* モバイル: プレビューフルスクリーンモーダル */}
+          {previewFile && (
+            <div className="fixed inset-0 z-50 bg-white md:hidden flex flex-col">
+              <PdfPreviewPanel
+                key={`mobile-${previewFile.fileId}`}
+                file={previewFile.file}
+                label={previewFile.label}
+                customOutputName={previewFile.customOutputName}
+                customStampPosition={previewFile.customStampPosition}
+                rotation={previewFile.rotation}
+                settings={settings}
+                onClose={() => setPreviewFile(null)}
+                onOpenEdit={() => setShowPdfEditFromPreview(true)}
+                onSavePosition={(pos) => {
+                  const { setCustomStampPosition } = useStore.getState();
+                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, pos);
+                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
+                }}
+                onResetPosition={() => {
+                  const { setCustomStampPosition } = useStore.getState();
+                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, undefined);
+                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
+                }}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -531,10 +641,11 @@ export default function App() {
         />
       )}
       {showClearConfirm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          role="dialog" aria-modal="true" aria-label="リストクリアの確認">
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-xs">
             <p className="text-sm font-medium text-gray-800 mb-1">リストをクリアしますか？</p>
-            <p className="text-xs text-gray-500 mb-4">すべてのファイルが削除されます。この操作は元に戻せません。</p>
+            <p className="text-xs text-gray-500 mb-4">すべてのファイルが削除されます。「元に戻す」で復元可能です。</p>
             <div className="flex gap-2">
               <button
                 onClick={() => setShowClearConfirm(false)}
@@ -550,6 +661,25 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Undo スナックバー */}
+      {undoSnapshot && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white rounded-xl shadow-2xl px-5 py-3 flex items-center gap-4 animate-slide-up">
+          <span className="text-sm">{undoSnapshot.label}</span>
+          <button
+            onClick={undo}
+            className="text-sm font-bold text-blue-300 hover:text-blue-100 underline underline-offset-2"
+          >
+            元に戻す
+          </button>
+          <button
+            onClick={clearUndo}
+            className="text-gray-400 hover:text-white text-xs ml-1"
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>
