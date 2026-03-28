@@ -13,6 +13,8 @@ import {
 } from '../utils/pdfEditUtils';
 import { useStore } from '../store/useStore';
 import type { StampPosition, Settings, StampColor } from '../types';
+import StampToolbar from './preview/StampToolbar';
+import PageEditToolbar from './preview/PageEditToolbar';
 
 interface Props {
   file: File;
@@ -546,180 +548,50 @@ export default function PdfPreviewPanel({
 
       {/* ツールバー */}
       <div className="shrink-0 border-b border-gray-100 bg-gray-50">
-        {/* スタンプ位置調整行 */}
-        <div className="px-4 py-1.5 flex items-center gap-2 flex-wrap">
-          {!stampEditing ? (
-            <button
-              onClick={() => { setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); if (viewMode === 'single') setCurrentPage(0); }}
-              className="text-xs text-orange-600 hover:text-orange-800 border border-orange-200 rounded px-2.5 py-1 hover:bg-orange-50 font-medium"
-            >
-              📍 スタンプ位置
-            </button>
-          ) : (
-            <>
-              <span className="text-xs text-orange-600 font-medium">📍 スタンプ編集</span>
-              <div className="ml-auto flex items-center gap-1.5">
-                <button onClick={handleResetStamp} className="text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100">
-                  リセット
-                </button>
-                <button onClick={handleSaveStamp} disabled={!anyStampChanged} className="text-[10px] text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 rounded px-2.5 py-0.5 font-medium">
-                  保存
-                </button>
-                <button
-                  onClick={() => {
-                    setStampEditing(false);
-                    setPos(customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop });
-                    setStampColor(settings.color);
-                    setStampFontSize(settings.fontSize);
-                    setPosChanged(false);
-                    setStampStyleChanged(false);
-                  }}
-                  className="text-[10px] text-gray-400 hover:text-gray-600"
-                >
-                  ✕
-                </button>
-              </div>
-            </>
-          )}
-          {/* スタンプ編集: 色・サイズ・位置 */}
-          {stampEditing && (
-            <div className="w-full flex items-center gap-3 mt-1 flex-wrap">
-              {/* 色 */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-gray-500">色:</span>
-                {(['red', 'blue', 'black'] as StampColor[]).map(c => (
-                  <button
-                    key={c}
-                    onClick={() => { setStampColor(c); setStampStyleChanged(true); }}
-                    className={`w-5 h-5 rounded-full border-2 transition-all ${
-                      stampColor === c ? 'border-gray-800 scale-110' : 'border-gray-300 hover:border-gray-500'
-                    }`}
-                    style={{ backgroundColor: c === 'red' ? '#dc2626' : c === 'blue' ? '#2563eb' : '#1f2937' }}
-                    title={c === 'red' ? '赤' : c === 'blue' ? '青' : '黒'}
-                  />
-                ))}
-              </div>
-              {/* サイズ */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-gray-500">サイズ:</span>
-                <button
-                  onClick={() => { setStampFontSize(f => Math.max(6, f - 1)); setStampStyleChanged(true); }}
-                  className="w-5 h-5 flex items-center justify-center border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100"
-                >−</button>
-                <span className="text-[10px] text-gray-700 font-medium w-8 text-center">{stampFontSize}pt</span>
-                <button
-                  onClick={() => { setStampFontSize(f => Math.min(36, f + 1)); setStampStyleChanged(true); }}
-                  className="w-5 h-5 flex items-center justify-center border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100"
-                >+</button>
-              </div>
-              {/* 位置 */}
-              <span className="text-[10px] text-gray-400">
-                位置: 上{pos.marginTop}pt / 右{pos.marginRight}pt — ドラッグで移動
-              </span>
-            </div>
-          )}
-          {!!customStampPosition && !stampEditing && (
-            <span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">位置調整済</span>
-          )}
-        </div>
+        <StampToolbar
+          stampEditing={stampEditing}
+          setStampEditing={setStampEditing}
+          pos={pos}
+          stampColor={stampColor}
+          setStampColor={setStampColor}
+          stampFontSize={stampFontSize}
+          setStampFontSize={setStampFontSize}
+          setStampStyleChanged={setStampStyleChanged}
+          anyStampChanged={anyStampChanged}
+          customStampPosition={customStampPosition}
+          settings={settings}
+          onSave={handleSaveStamp}
+          onReset={handleResetStamp}
+          onCancel={() => {
+            setStampEditing(false);
+            setPos(customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop });
+            setStampColor(settings.color);
+            setStampFontSize(settings.fontSize);
+            setPosChanged(false);
+            setStampStyleChanged(false);
+          }}
+          onStartEdit={() => { setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); if (viewMode === 'single') setCurrentPage(0); }}
+        />
 
-        {/* ページ編集ツールバー */}
-        {!stampEditing && (
-          <div className="px-4 py-1.5 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-            {viewMode === 'grid' && (
-              <button
-                onClick={selectedPages.size === totalPages ? deselectAll : selectAll}
-                disabled={totalPages === 0}
-                className="text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100 disabled:opacity-40"
-              >
-                {selectedPages.size === totalPages ? '選択解除' : '全選択'}
-              </button>
-            )}
-
-            {selectedPages.size > 0 && (
-              <>
-                <span className="text-xs text-blue-600 font-medium">{selectionSummary} 選択中</span>
-                <span className="text-gray-300">|</span>
-                <button
-                  onClick={handleRotatePages}
-                  disabled={editProcessing}
-                  className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2 py-1 hover:bg-blue-50 disabled:opacity-40 font-medium"
-                  title="選択ページを時計回りに90°回転"
-                >
-                  ↻ 回転
-                </button>
-                <button
-                  onClick={() => editConfirm === 'delete' ? setEditConfirm(null) : setEditConfirm('delete')}
-                  disabled={editProcessing || !canDelete}
-                  className={`text-xs border rounded px-2 py-1 font-medium disabled:opacity-40 ${
-                    editConfirm === 'delete'
-                      ? 'text-red-700 border-red-400 bg-red-50'
-                      : 'text-red-600 hover:text-red-800 border-red-200 hover:bg-red-50'
-                  }`}
-                  title={!canDelete ? '全ページは削除不可' : `${selectedPages.size}ページを削除`}
-                >
-                  🗑 削除{selectedPages.size > 1 ? ` (${selectedPages.size})` : ''}
-                </button>
-                {singleSelected !== null && (
-                  <button
-                    onClick={() => editConfirm === 'split' ? setEditConfirm(null) : setEditConfirm('split')}
-                    disabled={editProcessing || !canSplit}
-                    className={`text-xs border rounded px-2 py-1 font-medium disabled:opacity-40 ${
-                      editConfirm === 'split'
-                        ? 'text-orange-700 border-orange-400 bg-orange-50'
-                        : 'text-orange-600 hover:text-orange-800 border-orange-200 hover:bg-orange-50'
-                    }`}
-                    title={!canSplit ? '分割不可' : `p.${singleSelected + 1}の後で分割`}
-                  >
-                    ✂ 分割
-                  </button>
-                )}
-                <button
-                  onClick={deselectAll}
-                  className="text-[10px] text-gray-400 hover:text-gray-600 ml-auto"
-                  title="選択解除"
-                >
-                  ✕
-                </button>
-              </>
-            )}
-            {selectedPages.size === 0 && (
-              <span className="text-[10px] text-gray-400">
-                {viewMode === 'grid'
-                  ? 'クリックで選択 / Ctrl+クリック・Shift+矢印で複数選択 / ドラッグで並び替え'
-                  : '← → でページ送り / クリックで選択して編集'}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* 確認パネル */}
-        {editConfirm === 'delete' && selectedPages.size > 0 && (
-          <div className="px-4 py-2 bg-red-50 border-t border-red-200 flex items-center gap-3">
-            <span className="text-xs text-red-700 font-medium">
-              {selectedPages.size === 1 ? `ページ ${selectedArr[0] + 1} を削除しますか？` : `${selectedPages.size}ページを削除しますか？`}
-            </span>
-            <button onClick={handleDeletePages} disabled={editProcessing} className="text-xs bg-red-600 text-white rounded px-3 py-1 font-medium hover:bg-red-700 disabled:opacity-50">
-              削除する
-            </button>
-            <button onClick={() => setEditConfirm(null)} className="text-xs border border-gray-300 rounded px-3 py-1 hover:bg-white">
-              キャンセル
-            </button>
-          </div>
-        )}
-        {editConfirm === 'split' && singleSelected !== null && (
-          <div className="px-4 py-2 bg-orange-50 border-t border-orange-200 flex items-center gap-3 flex-wrap">
-            <span className="text-xs text-orange-700 font-medium">
-              p.1〜{singleSelected + 1} と p.{singleSelected + 2}〜{totalPages} に分割しますか？
-            </span>
-            <button onClick={handleSplitPage} disabled={editProcessing} className="text-xs bg-orange-500 text-white rounded px-3 py-1 font-medium hover:bg-orange-600 disabled:opacity-50">
-              分割する
-            </button>
-            <button onClick={() => setEditConfirm(null)} className="text-xs border border-gray-300 rounded px-3 py-1 hover:bg-white">
-              キャンセル
-            </button>
-          </div>
-        )}
+        <PageEditToolbar
+          viewMode={viewMode}
+          stampEditing={stampEditing}
+          totalPages={totalPages}
+          selectedPages={selectedPages}
+          selectedArr={selectedArr}
+          selectionSummary={selectionSummary}
+          canDelete={canDelete}
+          canSplit={canSplit}
+          singleSelected={singleSelected}
+          editProcessing={editProcessing}
+          editConfirm={editConfirm}
+          setEditConfirm={setEditConfirm}
+          onRotate={handleRotatePages}
+          onDelete={handleDeletePages}
+          onSplit={handleSplitPage}
+          onSelectAll={selectAll}
+          onDeselectAll={deselectAll}
+        />
       </div>
 
       {/* エラーバナー */}

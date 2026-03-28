@@ -54,8 +54,27 @@ export default function DropZone({ onDrop, compact }: Props) {
     >
       <div className="text-5xl mb-3 text-gray-300">⬆</div>
       <p className="text-gray-500 font-medium">ファイルをここにドラッグ＆ドロップ</p>
-      <p className="text-gray-400 text-sm mt-1">PDF / JPEG / PNG / HEIC に対応</p>
-      <p className="text-gray-400 text-sm">または左側の「ファイル追加」ボタンから選択</p>
+      <p className="text-gray-500 text-sm mt-1">PDF / JPEG / PNG / HEIC に対応</p>
+      <p className="text-gray-500 text-sm hidden md:block">または左側の「ファイル追加」ボタンから選択</p>
+      <button
+        type="button"
+        onClick={() => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*';
+          input.multiple = true;
+          input.onchange = (e) => {
+            const files = Array.from((e.target as HTMLInputElement).files ?? []).filter(
+              (f) => isPdfFile(f) || isImageFile(f),
+            );
+            if (files.length > 0) onDrop(files);
+          };
+          input.click();
+        }}
+        className="md:hidden mt-3 bg-blue-600 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-blue-700"
+      >
+        タップしてファイルを選択
+      </button>
     </div>
   );
 }

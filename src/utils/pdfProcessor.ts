@@ -18,7 +18,7 @@ export interface ProcessResult {
 export async function processAllFiles(
   groups: FileGroup[],
   settings: Settings,
-  onProgress: (current: number, total: number) => void,
+  onProgress: (current: number, total: number, currentFileName?: string) => void,
 ): Promise<ProcessResult> {
   const sym = getSymbolText(settings.symbol, settings.customSymbol);
   const nl = settings.numberless;
@@ -101,7 +101,7 @@ export async function processAllFiles(
       }
 
       current++;
-      onProgress(current, total);
+      onProgress(current, total, group.mainFile.file.name);
     } else {
       // ── 個別出力 ──
       const allEntries = hasBranches
@@ -123,7 +123,7 @@ export async function processAllFiles(
         }
 
         current++;
-        onProgress(current, total);
+        onProgress(current, total, entry.file.name);
       }
     }
   }

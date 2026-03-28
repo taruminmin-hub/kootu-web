@@ -98,6 +98,7 @@ export default function AiNameModal({ groups, onApply, onClose }: Props) {
   return (
     <div
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      role="dialog" aria-modal="true" aria-label="AI名前提案"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-lg max-h-[80vh]">

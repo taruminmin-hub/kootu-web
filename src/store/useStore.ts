@@ -52,12 +52,12 @@ function loadSettings(): Settings {
         const result = { ...defaultSettings, ...migrated };
         try {
           localStorage.setItem('kootu-settings', JSON.stringify({ ...result, __version: SETTINGS_VERSION }));
-        } catch { /* ignore */ }
+        } catch (e) { console.warn('設定の保存に失敗しました:', e); }
         return result as Settings;
       }
       return { ...defaultSettings, ...parsed };
     }
-  } catch { /* ignore */ }
+  } catch (e) { console.warn('設定の読み込みに失敗しました:', e); }
   return defaultSettings;
 }
 
@@ -228,7 +228,7 @@ export const useStore = create<AppState>((set, get) => ({
       const newSettings = { ...s.settings, ...partial };
       try {
         localStorage.setItem('kootu-settings', JSON.stringify({ ...newSettings, __version: SETTINGS_VERSION }));
-      } catch { /* ignore */ }
+      } catch (e) { console.warn('設定の保存に失敗しました:', e); }
       return { settings: newSettings };
     }),
 

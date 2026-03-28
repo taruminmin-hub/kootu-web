@@ -150,6 +150,7 @@ export default function AiSplitModal({ file, onComplete, onClose }: Props) {
   return (
     <div
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      role="dialog" aria-modal="true" aria-label="AI分割"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-4xl overflow-hidden" style={{ height: '90vh' }}>

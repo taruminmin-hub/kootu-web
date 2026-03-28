@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   DndContext, closestCenter, DragOverlay,
   PointerSensor, useSensor, useSensors,
@@ -6,10 +6,8 @@ import {
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useStore } from './store/useStore';
-import { computeOutputFileNames, processAllFiles, downloadAsZip } from './utils/pdfProcessor';
-import type { ProcessResult } from './utils/pdfProcessor';
-import { imageToPdf, isImageFile, isPdfFile } from './utils/imageConverter';
-import { isPdfLandscape } from './utils/orientationDetector';
+import { useFileManagement } from './hooks/useFileManagement';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
 import FileGroupRow from './components/FileGroupRow';
 import DropZone from './components/DropZone';
 import SettingsModal from './components/SettingsModal';
@@ -42,33 +40,14 @@ function formatSize(bytes: number): string {
 }
 
 export default function App() {
-  const { groups, settings, addFiles, reorderGroups, updateSettings, clearAll, deleteFiles, moveGroupAsBranch, addFilesFromSplit, batchRename, undoSnapshot, undo, clearUndo } = useStore();
-  const [showSettings, setShowSettings] = useState(false);
-  const [processing, setProcessing] = useState(false);
-  const [converting, setConverting] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
-  const [error, setError] = useState<string | null>(null);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [confirmFileNames, setConfirmFileNames] = useState<string[]>([]);
-  const [processedResults, setProcessedResults] = useState<ProcessResult | null>(null);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [showAiSplit, setShowAiSplit] = useState(false);
-  const [aiSplitFile, setAiSplitFile] = useState<File | null>(null);
-  const [showAiName, setShowAiName] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<{
-    fileId: string; file: File; label: string;
-    customOutputName?: string; groupId: string;
-    customStampPosition?: import('./types').StampPosition;
-    rotation: 0 | 90 | 180 | 270;
-  } | null>(null);
-  const [mainAreaDragOver, setMainAreaDragOver] = useState(false);
+  const { groups, settings, updateSettings, clearAll, reorderGroups, moveGroupAsBranch, addFilesFromSplit, batchRename, undoSnapshot, undo, clearUndo } = useStore();
+  const fm = useFileManagement();
+  const isOnline = useOnlineStatus();
 
-  // カスタム符号が空の場合に処理を無効化
-  const isCustomSymbolEmpty = settings.symbol === 'custom' && !settings.customSymbol.trim();
+  const [showSettings, setShowSettings] = useState(false);
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mainAreaDragOver, setMainAreaDragOver] = useState(false);
 
   // Undo スナックバーの自動非表示（8秒後）
   useEffect(() => {
@@ -83,13 +62,6 @@ export default function App() {
   }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-
-  const totalFiles = groups.reduce((s, g) => s + 1 + g.branchFiles.length, 0);
-  const totalSize = groups.reduce((s, g) => {
-    let n = g.mainFile.file.size;
-    g.branchFiles.forEach((f) => (n += f.file.size));
-    return s + n;
-  }, 0);
 
   const handleDragStart = (e: DragStartEvent) => {
     setDraggingGroupId(String(e.active.id));
@@ -108,144 +80,6 @@ export default function App() {
     }
   };
 
-  /** PDF・画像ファイルを受け取り、画像は PDF に変換してからリストに追加する */
-  const handleAddFiles = useCallback(async (rawFiles: File[]) => {
-    setError(null);
-    const acceptable = rawFiles.filter((f) => isPdfFile(f) || isImageFile(f));
-    if (!acceptable.length) return;
-
-    const images = acceptable.filter(isImageFile);
-    const pdfs = acceptable.filter(isPdfFile);
-
-    setConverting(true);
-    try {
-      // 画像 → PDF 変換（常に縦向きで出力）
-      const converted = await Promise.all(images.map(imageToPdf));
-
-      // 横向き PDF を自動検出して rotation=90 を設定
-      const allPdfs = [...pdfs, ...converted];
-      const withRotations = await Promise.all(
-        allPdfs.map(async (file) => ({
-          file,
-          rotation: (await isPdfLandscape(file) ? 90 : 0) as 0 | 90,
-        })),
-      );
-      addFiles(withRotations);
-    } catch (err) {
-      setError(err instanceof Error ? `ファイル処理失敗: ${err.message}` : 'ファイル処理中にエラーが発生しました');
-    } finally {
-      setConverting(false);
-    }
-  }, [addFiles]);
-
-  const openFilePicker = useCallback(() => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*';
-    input.multiple = true;
-    input.onchange = (e) => {
-      const files = Array.from((e.target as HTMLInputElement).files ?? []);
-      if (files.length) handleAddFiles(files);
-    };
-    input.click();
-  }, [handleAddFiles]);
-
-  const openAiSplitPicker = useCallback(() => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.pdf,application/pdf';
-    input.onchange = (e) => {
-      const files = Array.from((e.target as HTMLInputElement).files ?? []);
-      if (files.length > 0) {
-        setAiSplitFile(files[0]);
-        setShowAiSplit(true);
-      }
-    };
-    input.click();
-  }, []);
-
-  const handlePreviewSelect = useCallback((
-    fileId: string, file: File, label: string, customOutputName?: string,
-    groupId?: string, customStampPosition?: import('./types').StampPosition,
-    rotation?: 0 | 90 | 180 | 270,
-  ) => {
-    setPreviewFile(prev =>
-      prev?.fileId === fileId ? null : {
-        fileId, file, label, customOutputName,
-        groupId: groupId ?? '',
-        customStampPosition,
-        rotation: rotation ?? 0,
-      },
-    );
-  }, []);
-
-  const handlePreviewReplaceFile = useCallback((newFile: File) => {
-    if (!previewFile) return;
-    const { replaceFile } = useStore.getState();
-    for (const g of groups) {
-      if (g.mainFile.id === previewFile.fileId) {
-        replaceFile(g.id, g.mainFile.id, newFile);
-        setPreviewFile({ ...previewFile, file: newFile });
-        return;
-      }
-      const branch = g.branchFiles.find(f => f.id === previewFile.fileId);
-      if (branch) {
-        replaceFile(g.id, branch.id, newFile);
-        setPreviewFile({ ...previewFile, file: newFile });
-        return;
-      }
-    }
-  }, [previewFile, groups]);
-
-  const handlePreviewSplitFile = useCallback((file1: File, file2: File) => {
-    if (!previewFile) return;
-    const { splitFileIntoTwo } = useStore.getState();
-    splitFileIntoTwo(previewFile.groupId, previewFile.fileId, file1, file2);
-    setPreviewFile(null);
-  }, [previewFile]);
-
-  const toggleSelect = useCallback((fileId: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(fileId)) next.delete(fileId); else next.add(fileId);
-      return next;
-    });
-  }, []);
-
-  const handleDeleteSelected = useCallback(() => {
-    deleteFiles(Array.from(selectedIds));
-    setSelectedIds(new Set());
-    setSelectionMode(false);
-  }, [selectedIds, deleteFiles]);
-
-  const handleProcessClick = useCallback(() => {
-    if (!groups.length) return;
-    setConfirmFileNames(computeOutputFileNames(groups, settings));
-    setShowConfirm(true);
-  }, [groups, settings]);
-
-  const handleConfirmProcess = useCallback(async () => {
-    setShowConfirm(false);
-    setProcessing(true);
-    setError(null);
-    setProgress({ current: 0, total: 0 });
-    try {
-      const result = await processAllFiles(groups, settings, (cur, tot) =>
-        setProgress({ current: cur, total: tot }),
-      );
-      setProcessedResults(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '処理中にエラーが発生しました');
-    } finally {
-      setProcessing(false);
-    }
-  }, [groups, settings]);
-
-  const handleDownloadZip = useCallback(async () => {
-    if (!processedResults) return;
-    await downloadAsZip(processedResults.files);
-  }, [processedResults]);
-
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* ── ヘッダー ── */}
@@ -254,6 +88,7 @@ export default function App() {
         <button
           onClick={() => setSidebarOpen(v => !v)}
           className="md:hidden shrink-0 w-8 h-8 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100"
+          aria-label="メニューを開く"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -323,9 +158,13 @@ export default function App() {
           <div className="fixed inset-0 bg-black/30 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
         )}
         {/* ── サイドバー ── */}
-        <aside className={`w-52 bg-white border-r border-gray-200 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto transition-transform z-40 ${
-          sidebarOpen ? 'fixed inset-y-0 left-0 top-[53px] translate-x-0 shadow-xl' : 'hidden md:flex'
-        }`}>
+        <aside
+          className={`w-52 bg-white border-r border-gray-200 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto transition-transform z-40 ${
+            sidebarOpen ? 'fixed inset-y-0 left-0 top-[53px] translate-x-0 shadow-xl' : 'hidden md:flex'
+          }`}
+          role="navigation"
+          aria-label="サイドバー"
+        >
           {/* モバイル: 符号・開始番号設定 */}
           <div className="md:hidden space-y-2 pb-3 border-b border-gray-200">
             <div className="flex items-center gap-2">
@@ -372,86 +211,92 @@ export default function App() {
 
           {/* ── 主要アクション ── */}
           <button
-            onClick={openFilePicker}
+            onClick={fm.openFilePicker}
             className="bg-blue-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-2"
           >
             📁 ファイル追加
           </button>
 
           <button
-            onClick={handleProcessClick}
-            disabled={!groups.length || processing || isCustomSymbolEmpty}
+            onClick={fm.handleProcessClick}
+            disabled={!groups.length || fm.processing || fm.isCustomSymbolEmpty}
             className="bg-green-600 text-white rounded-lg px-4 py-3 text-sm font-bold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm ring-1 ring-green-700/10"
-            title={isCustomSymbolEmpty ? 'カスタム符号を入力してください' : undefined}
+            title={fm.isCustomSymbolEmpty ? 'カスタム符号を入力してください' : undefined}
           >
             📋 スタンプ付与
           </button>
-          {isCustomSymbolEmpty && (
+          {fm.isCustomSymbolEmpty && (
             <p className="text-xs text-red-500">カスタム符号が未入力です</p>
           )}
 
           <hr className="border-gray-200" />
 
           {/* ── AI ツール ── */}
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">AI ツール</p>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">AI ツール</p>
           <button
-            onClick={openAiSplitPicker}
-            className="bg-purple-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-700 flex items-center justify-center gap-2"
+            onClick={fm.openAiSplitPicker}
+            disabled={!isOnline}
+            className="bg-purple-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            title={!isOnline ? 'オフラインのため利用できません' : undefined}
           >
             🤖 AI分割
           </button>
 
           <button
-            onClick={() => setShowAiName(true)}
-            disabled={!groups.length}
+            onClick={() => fm.setShowAiName(true)}
+            disabled={!groups.length || !isOnline}
             className="border border-purple-300 text-purple-700 rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            title={!isOnline ? 'オフラインのため利用できません' : undefined}
           >
             🤖 AI名前提案
           </button>
+          {!isOnline && (
+            <p className="text-[10px] text-gray-500">オフラインです</p>
+          )}
 
           <hr className="border-gray-200" />
 
           {/* ── 管理 ── */}
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">管理</p>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">管理</p>
           <div className="flex gap-1.5">
             <button
-              onClick={() => setShowClearConfirm(true)}
+              onClick={() => fm.setShowClearConfirm(true)}
               disabled={!groups.length}
               className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               クリア
             </button>
             <button
-              onClick={() => { setSelectionMode((m) => !m); setSelectedIds(new Set()); }}
-              className={`flex-1 border rounded-lg px-2 py-1.5 text-xs ${selectionMode ? 'bg-blue-50 border-blue-400 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`}
+              onClick={() => { fm.setSelectionMode((m) => !m); fm.setSelectedIds(new Set()); }}
+              className={`flex-1 border rounded-lg px-2 py-1.5 text-xs ${fm.selectionMode ? 'bg-blue-50 border-blue-400 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`}
             >
-              {selectionMode ? '選択中...' : '選択削除'}
+              {fm.selectionMode ? '選択中...' : '選択削除'}
             </button>
           </div>
-          {selectionMode && selectedIds.size > 0 && (
+          {fm.selectionMode && fm.selectedIds.size > 0 && (
             <button
-              onClick={handleDeleteSelected}
+              onClick={fm.handleDeleteSelected}
               className="bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-700"
             >
-              削除 ({selectedIds.size}件)
+              削除 ({fm.selectedIds.size}件)
             </button>
           )}
 
-          {totalFiles > 0 && (
+          {fm.totalFiles > 0 && (
             <div className="mt-2 pt-3 border-t border-gray-100 text-sm text-gray-600 space-y-1">
-              <div>ファイル数: <span className="font-bold text-gray-800">{totalFiles}</span></div>
-              <div className="text-xs text-gray-400">{formatSize(totalSize)}</div>
+              <div>ファイル数: <span className="font-bold text-gray-800">{fm.totalFiles}</span></div>
+              <div className="text-xs text-gray-500">{formatSize(fm.totalSize)}</div>
             </div>
           )}
 
-          {error && (
+          {fm.error && (
             <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 leading-relaxed">
-              ⚠ {error}
+              ⚠ {fm.error}
             </div>
           )}
 
           <div className="mt-auto pt-4 border-t border-gray-100">
-            <p className="text-xs text-gray-400 leading-relaxed">
+            <p className="text-xs text-gray-500 leading-relaxed">
               💡 「枝番化」で直前の項目の枝番に統合。「主番号化」で独立。⠿ ドラッグで並び替え。
             </p>
           </div>
@@ -462,7 +307,7 @@ export default function App() {
           {/* 左: ファイル一覧 */}
           <main
             className={`p-4 overflow-y-auto transition-all relative ${
-              previewFile ? 'w-1/2 lg:w-[45%]' : 'flex-1'
+              fm.previewFile ? 'w-1/2 lg:w-[45%]' : 'flex-1'
             }`}
             onDragOver={(e) => {
               if (groups.length > 0 && e.dataTransfer.types.includes('Files')) {
@@ -480,7 +325,7 @@ export default function App() {
                 e.preventDefault();
                 setMainAreaDragOver(false);
                 const files = Array.from(e.dataTransfer.files);
-                handleAddFiles(files);
+                fm.handleAddFiles(files);
               }
             }}
           >
@@ -491,7 +336,7 @@ export default function App() {
               </div>
             )}
             {groups.length === 0 ? (
-              <DropZone onDrop={handleAddFiles} />
+              <DropZone onDrop={fm.handleAddFiles} />
             ) : (
               <>
                 <DndContext
@@ -513,12 +358,12 @@ export default function App() {
                           settings={settings}
                           isFirst={i === 0}
                           isLast={i === groups.length - 1}
-                          selectionMode={selectionMode}
-                          selectedIds={selectedIds}
-                          onToggleSelect={toggleSelect}
+                          selectionMode={fm.selectionMode}
+                          selectedIds={fm.selectedIds}
+                          onToggleSelect={fm.toggleSelect}
                           draggingGroupId={draggingGroupId}
-                          previewingFileId={previewFile?.fileId}
-                          onPreviewSelect={handlePreviewSelect}
+                          previewingFileId={fm.previewFile?.fileId}
+                          onPreviewSelect={fm.handlePreviewSelect}
                         />
                       ))}
                     </div>
@@ -531,7 +376,7 @@ export default function App() {
                         <div className="bg-white border-2 border-blue-400 rounded-xl p-3 shadow-xl opacity-80 w-[200px]">
                           <div className="text-sm font-medium text-gray-700 truncate">{g.mainFile.file.name}</div>
                           {g.branchFiles.length > 0 && (
-                            <div className="text-xs text-gray-400 mt-1">+ {g.branchFiles.length} 枝番</div>
+                            <div className="text-xs text-gray-500 mt-1">+ {g.branchFiles.length} 枝番</div>
                           )}
                         </div>
                       );
@@ -539,62 +384,62 @@ export default function App() {
                   </DragOverlay>
                 </DndContext>
                 <div className="mt-3">
-                  <DropZone onDrop={handleAddFiles} compact />
+                  <DropZone onDrop={fm.handleAddFiles} compact />
                 </div>
               </>
             )}
           </main>
 
           {/* 右: PDFプレビューパネル（デスクトップ: サイドパネル） */}
-          {previewFile && (
+          {fm.previewFile && (
             <aside className="w-1/2 lg:w-[55%] border-l border-gray-200 bg-white hidden md:block">
               <PdfPreviewPanel
-                key={previewFile.fileId}
-                file={previewFile.file}
-                label={previewFile.label}
-                customOutputName={previewFile.customOutputName}
-                customStampPosition={previewFile.customStampPosition}
-                rotation={previewFile.rotation}
+                key={fm.previewFile.fileId}
+                file={fm.previewFile.file}
+                label={fm.previewFile.label}
+                customOutputName={fm.previewFile.customOutputName}
+                customStampPosition={fm.previewFile.customStampPosition}
+                rotation={fm.previewFile.rotation}
                 settings={settings}
-                onClose={() => setPreviewFile(null)}
-                onReplaceFile={handlePreviewReplaceFile}
-                onSplitFile={handlePreviewSplitFile}
+                onClose={() => fm.setPreviewFile(null)}
+                onReplaceFile={fm.handlePreviewReplaceFile}
+                onSplitFile={fm.handlePreviewSplitFile}
                 onSavePosition={(pos) => {
                   const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, pos);
-                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
+                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, pos);
+                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
                 }}
                 onResetPosition={() => {
                   const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, undefined);
-                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
+                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, undefined);
+                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
                 }}
               />
             </aside>
           )}
           {/* モバイル: プレビューフルスクリーンモーダル */}
-          {previewFile && (
-            <div className="fixed inset-0 z-50 bg-white md:hidden flex flex-col">
+          {fm.previewFile && (
+            <div className="fixed inset-0 z-50 bg-white md:hidden flex flex-col" role="dialog" aria-modal="true" aria-label="PDFプレビュー">
               <PdfPreviewPanel
-                key={`mobile-${previewFile.fileId}`}
-                file={previewFile.file}
-                label={previewFile.label}
-                customOutputName={previewFile.customOutputName}
-                customStampPosition={previewFile.customStampPosition}
-                rotation={previewFile.rotation}
+                key={`mobile-${fm.previewFile.fileId}`}
+                file={fm.previewFile.file}
+                label={fm.previewFile.label}
+                customOutputName={fm.previewFile.customOutputName}
+                customStampPosition={fm.previewFile.customStampPosition}
+                rotation={fm.previewFile.rotation}
                 settings={settings}
-                onClose={() => setPreviewFile(null)}
-                onReplaceFile={handlePreviewReplaceFile}
-                onSplitFile={handlePreviewSplitFile}
+                onClose={() => fm.setPreviewFile(null)}
+                onReplaceFile={fm.handlePreviewReplaceFile}
+                onSplitFile={fm.handlePreviewSplitFile}
                 onSavePosition={(pos) => {
                   const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, pos);
-                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
+                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, pos);
+                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
                 }}
                 onResetPosition={() => {
                   const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, undefined);
-                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
+                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, undefined);
+                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
                 }}
               />
             </div>
@@ -603,45 +448,45 @@ export default function App() {
       </div>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {processing && <ProcessingOverlay current={progress.current} total={progress.total} />}
-      {converting && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      {fm.processing && <ProcessingOverlay current={fm.progress.current} total={fm.progress.total} currentFileName={fm.progress.currentFileName} />}
+      {fm.converting && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="変換中">
           <div className="bg-white rounded-2xl shadow-2xl p-6 flex items-center gap-4">
             <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
             <p className="text-sm font-medium text-gray-700">画像を PDF に変換中…</p>
           </div>
         </div>
       )}
-      {showConfirm && (
+      {fm.showConfirm && (
         <ConfirmOutputModal
-          fileNames={confirmFileNames}
-          onConfirm={handleConfirmProcess}
-          onCancel={() => setShowConfirm(false)}
+          fileNames={fm.confirmFileNames}
+          onConfirm={fm.handleConfirmProcess}
+          onCancel={() => fm.setShowConfirm(false)}
         />
       )}
-      {processedResults && !processing && (
+      {fm.processedResults && !fm.processing && (
         <ResultModal
-          results={processedResults.files}
-          warnings={processedResults.warnings}
-          onDownloadZip={handleDownloadZip}
-          onClose={() => setProcessedResults(null)}
+          results={fm.processedResults.files}
+          warnings={fm.processedResults.warnings}
+          onDownloadZip={fm.handleDownloadZip}
+          onClose={() => fm.setProcessedResults(null)}
         />
       )}
-      {showAiSplit && aiSplitFile && (
+      {fm.showAiSplit && fm.aiSplitFile && (
         <AiSplitModal
-          file={aiSplitFile}
+          file={fm.aiSplitFile}
           onComplete={(files) => addFilesFromSplit(files)}
-          onClose={() => { setShowAiSplit(false); setAiSplitFile(null); }}
+          onClose={() => { fm.setShowAiSplit(false); fm.setAiSplitFile(null); }}
         />
       )}
-      {showAiName && (
+      {fm.showAiName && (
         <AiNameModal
           groups={groups}
           onApply={(updates) => batchRename(updates)}
-          onClose={() => setShowAiName(false)}
+          onClose={() => fm.setShowAiName(false)}
         />
       )}
-      {showClearConfirm && (
+      {fm.showClearConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
           role="dialog" aria-modal="true" aria-label="リストクリアの確認">
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-xs">
@@ -649,13 +494,13 @@ export default function App() {
             <p className="text-xs text-gray-500 mb-4">すべてのファイルが削除されます。「元に戻す」で復元可能です。</p>
             <div className="flex gap-2">
               <button
-                onClick={() => setShowClearConfirm(false)}
+                onClick={() => fm.setShowClearConfirm(false)}
                 className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50"
               >
                 キャンセル
               </button>
               <button
-                onClick={() => { clearAll(); setShowClearConfirm(false); }}
+                onClick={() => { clearAll(); fm.setShowClearConfirm(false); }}
                 className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-red-700"
               >
                 クリア
@@ -678,6 +523,7 @@ export default function App() {
           <button
             onClick={clearUndo}
             className="text-gray-400 hover:text-white text-xs ml-1"
+            aria-label="閉じる"
           >
             ✕
           </button>
