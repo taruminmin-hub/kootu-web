@@ -10,16 +10,14 @@ import { pdfjsLib } from '../utils/pdfWorkerSetup';
 import { createStampImage } from '../utils/stampUtils';
 import {
   reorderPages, rotateMultiplePages, deleteMultiplePages, splitPdfAfterPage,
-  applyRedactions,
+  applyAnnotations, convertAnnotationToPdf,
 } from '../utils/pdfEditUtils';
-import type { RedactionRect } from '../utils/pdfEditUtils';
 import { useStore } from '../store/useStore';
 import { printPageImage } from '../utils/printUtils';
 import type { StampPosition, Settings, StampColor } from '../types';
-import StampToolbar from './preview/StampToolbar';
-import PageEditToolbar from './preview/PageEditToolbar';
-import RedactionOverlay from './preview/RedactionOverlay';
-import type { RedactionBox } from './preview/RedactionOverlay';
+import type { Annotation, AnnotationTool, AnnotationStyle } from '../types/annotation';
+import EditorToolbar from './preview/EditorToolbar';
+import AnnotationOverlay from './preview/AnnotationOverlay';
 
 interface Props {
   file: File;
@@ -55,6 +53,15 @@ function SortablePageThumb({
   );
 }
 
+const DEFAULT_STYLE: AnnotationStyle = {
+  strokeEnabled: true,
+  strokeColor: '#ef4444',
+  fillEnabled: false,
+  fillColor: '#ef4444',
+  lineWidth: 2,
+  opacity: 1,
+};
+
 export default function PdfPreviewPanel({
   file, label, customOutputName, customStampPosition, rotation,
   settings, onClose, onReplaceFile, onSplitFile, onSavePosition, onResetPosition,
@@ -81,7 +88,7 @@ export default function PdfPreviewPanel({
   // ── ページ選択（複数対応） ──
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
   const lastClickedRef = useRef<number | null>(null);
-  const selectionAnchorRef = useRef<number | null>(null); // Shift+矢印の基準点
+  const selectionAnchorRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // ── 編集状態 ──
@@ -89,9 +96,10 @@ export default function PdfPreviewPanel({
   const [editConfirm, setEditConfirm] = useState<'delete' | 'split' | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
 
-  // ── 墨消し（状態のみ、ハンドラーは pdfSize/firstPageRect 宣言後に定義） ──
-  const [redactionMode, setRedactionMode] = useState(false);
-  const [redactionBoxes, setRedactionBoxes] = useState<Map<number, RedactionBox[]>>(new Map());
+  // ── 注釈ツール ──
+  const [activeTool, setActiveTool] = useState<AnnotationTool>('select');
+  const [annStyle, setAnnStyle] = useState<AnnotationStyle>(DEFAULT_STYLE);
+  const [annotationsByPage, setAnnotationsByPage] = useState<Map<number, Annotation[]>>(new Map());
 
   // ── ドラッグ中のページ ──
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
@@ -246,66 +254,62 @@ export default function PdfPreviewPanel({
   };
   const anyStampChanged = posChanged || stampStyleChanged;
 
-  // ── 墨消しハンドラー ──
-  const currentPageBoxes = redactionBoxes.get(currentPage) ?? [];
-  const totalRedactions = Array.from(redactionBoxes.values()).reduce((s, b) => s + b.length, 0);
+  // ── 注釈ハンドラー ──
+  const totalAnnotations = Array.from(annotationsByPage.values()).reduce((s, a) => s + a.length, 0);
 
-  const handleAddRedactionBox = useCallback((box: RedactionBox) => {
-    setRedactionBoxes(prev => {
+  const handleAddAnnotation = useCallback((ann: Annotation) => {
+    setAnnotationsByPage(prev => {
       const next = new Map(prev);
       const existing = next.get(currentPage) ?? [];
-      next.set(currentPage, [...existing, box]);
+      next.set(currentPage, [...existing, ann]);
       return next;
     });
   }, [currentPage]);
 
-  const handleRemoveRedactionBox = useCallback((id: string) => {
-    setRedactionBoxes(prev => {
+  const handleRemoveAnnotation = useCallback((id: string) => {
+    setAnnotationsByPage(prev => {
       const next = new Map(prev);
       const existing = next.get(currentPage) ?? [];
-      next.set(currentPage, existing.filter(b => b.id !== id));
+      next.set(currentPage, existing.filter(a => a.id !== id));
       return next;
     });
   }, [currentPage]);
 
-  const handleApplyRedactions = useCallback(async () => {
-    if (totalRedactions === 0) return;
+  const handleApplyAnnotations = useCallback(async () => {
+    if (totalAnnotations === 0) return;
     setEditError(null);
     setEditProcessing(true);
     try {
-      const rects: RedactionRect[] = [];
-      for (const [pageIdx, boxes] of redactionBoxes.entries()) {
-        for (const box of boxes) {
-          const pdfW = pdfSize.w;
-          const pdfH = pdfSize.h;
-          const displayW = firstPageRect.w;
-          const displayH = firstPageRect.h;
-          if (displayW <= 0 || displayH <= 0) continue;
-          const sx = pdfW / displayW;
-          const sy = pdfH / displayH;
-          rects.push({
-            pageIndex: pageIdx,
-            x: box.x * sx,
-            y: pdfH - (box.y + box.height) * sy,
-            width: box.width * sx,
-            height: box.height * sy,
-          });
+      const pdfAnns = [];
+      for (const [pageIdx, anns] of annotationsByPage.entries()) {
+        for (const ann of anns) {
+          pdfAnns.push(convertAnnotationToPdf(
+            ann, pageIdx,
+            firstPageRect.w, firstPageRect.h,
+            pdfSize.w, pdfSize.h,
+          ));
         }
       }
-      const newFile = await applyRedactions(file, rects);
+      const newFile = await applyAnnotations(file, pdfAnns);
       onReplaceFile(newFile);
-      setRedactionBoxes(new Map());
-      setRedactionMode(false);
+      setAnnotationsByPage(new Map());
+      setActiveTool('select');
     } catch (e) {
-      setEditError(e instanceof Error ? e.message : '墨消しの適用に失敗しました');
+      setEditError(e instanceof Error ? e.message : '注釈の適用に失敗しました');
     } finally {
       setEditProcessing(false);
     }
-  }, [file, redactionBoxes, totalRedactions, pdfSize, firstPageRect, onReplaceFile]);
+  }, [file, annotationsByPage, totalAnnotations, pdfSize, firstPageRect, onReplaceFile]);
+
+  const handleClearAnnotations = useCallback(() => {
+    setAnnotationsByPage(new Map());
+    setActiveTool('select');
+  }, []);
 
   // ── ページクリック（複数選択対応） ──
   const handlePageClick = useCallback((pageIndex: number, e: React.MouseEvent) => {
     if (stampEditing && pageIndex === 0) return;
+    if (activeTool !== 'select') return; // 注釈ツール使用中はページ選択しない
     setEditConfirm(null);
 
     setSelectedPages(prev => {
@@ -328,7 +332,7 @@ export default function PdfPreviewPanel({
       if (prev.size === 1 && prev.has(pageIndex)) return new Set();
       return new Set([pageIndex]);
     });
-  }, [stampEditing]);
+  }, [stampEditing, activeTool]);
 
   // ── 矢印キー操作 ──
   useEffect(() => {
@@ -339,7 +343,6 @@ export default function PdfPreviewPanel({
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
 
       const isNext = e.key === 'ArrowDown' || e.key === 'ArrowRight';
-
       e.preventDefault();
 
       if (viewMode === 'single' && !e.shiftKey) {
@@ -347,13 +350,10 @@ export default function PdfPreviewPanel({
         return;
       }
 
-      // 現在のカーソル位置（lastClicked）
       const cursor = lastClickedRef.current ?? 0;
       const nextCursor = isNext ? Math.min(cursor + 1, totalPages - 1) : Math.max(cursor - 1, 0);
 
       if (e.shiftKey) {
-        // Shift+矢印: アンカーからカーソルまでの範囲を選択
-        // アンカーが未設定なら現在のカーソルをアンカーにする
         if (selectionAnchorRef.current === null) {
           selectionAnchorRef.current = cursor;
         }
@@ -365,13 +365,11 @@ export default function PdfPreviewPanel({
         lastClickedRef.current = nextCursor;
         setSelectedPages(next);
       } else {
-        // 矢印のみ: 単一選択を移動
         lastClickedRef.current = nextCursor;
         selectionAnchorRef.current = nextCursor;
         setSelectedPages(new Set([nextCursor]));
       }
 
-      // スクロールで見えるようにする
       setTimeout(() => {
         const thumb = el.querySelector(`[data-page-index="${nextCursor}"]`);
         thumb?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -388,7 +386,6 @@ export default function PdfPreviewPanel({
     if (!el || viewMode !== 'single') return;
     const handler = (e: WheelEvent) => {
       if (wheelCooldown.current) return;
-      // 小さなスクロール量は無視（トラックパッドの慣性）
       if (Math.abs(e.deltaY) < 30) return;
       e.preventDefault();
       wheelCooldown.current = true;
@@ -531,6 +528,9 @@ export default function PdfPreviewPanel({
   const renderPageThumb = (i: number, dataUrl: string, isGrid: boolean) => {
     const isSelected = selectedPages.has(i);
     const isFirstPage = i === 0;
+    const showOverlay = viewMode === 'single' && !isGrid && activeTool !== 'select' && !stampEditing;
+    const pageAnns = annotationsByPage.get(i) ?? [];
+
     return (
       <div
         data-page-index={i}
@@ -552,28 +552,77 @@ export default function PdfPreviewPanel({
           >
             <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
             {renderStampOverlay(i)}
-            {viewMode === 'single' && !isGrid && (
-              <RedactionOverlay
+            {showOverlay && (
+              <AnnotationOverlay
                 containerWidth={firstPageRect.w}
                 containerHeight={firstPageRect.h}
-                boxes={currentPageBoxes}
-                onAddBox={handleAddRedactionBox}
-                onRemoveBox={handleRemoveRedactionBox}
-                enabled={redactionMode && !stampEditing}
+                annotations={pageAnns}
+                activeTool={activeTool}
+                strokeColor={annStyle.strokeColor}
+                fillColor={annStyle.fillColor}
+                lineWidth={annStyle.lineWidth}
+                opacity={annStyle.opacity}
+                strokeEnabled={annStyle.strokeEnabled}
+                fillEnabled={annStyle.fillEnabled}
+                onAddAnnotation={handleAddAnnotation}
+                onRemoveAnnotation={handleRemoveAnnotation}
+                enabled={!stampEditing}
+              />
+            )}
+            {/* selectモードでも既存注釈を表示 */}
+            {viewMode === 'single' && !isGrid && activeTool === 'select' && pageAnns.length > 0 && (
+              <AnnotationOverlay
+                containerWidth={firstPageRect.w}
+                containerHeight={firstPageRect.h}
+                annotations={pageAnns}
+                activeTool="select"
+                strokeColor={annStyle.strokeColor}
+                fillColor={annStyle.fillColor}
+                lineWidth={annStyle.lineWidth}
+                opacity={annStyle.opacity}
+                strokeEnabled={annStyle.strokeEnabled}
+                fillEnabled={annStyle.fillEnabled}
+                onAddAnnotation={handleAddAnnotation}
+                onRemoveAnnotation={handleRemoveAnnotation}
+                enabled={true}
               />
             )}
           </div>
         ) : (
           <div className="relative">
             <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
-            {viewMode === 'single' && !isGrid && redactionMode && (
-              <RedactionOverlay
+            {showOverlay && (
+              <AnnotationOverlay
                 containerWidth={firstPageRect.w}
                 containerHeight={firstPageRect.h}
-                boxes={redactionBoxes.get(i) ?? []}
-                onAddBox={handleAddRedactionBox}
-                onRemoveBox={handleRemoveRedactionBox}
-                enabled={redactionMode && !stampEditing}
+                annotations={pageAnns}
+                activeTool={activeTool}
+                strokeColor={annStyle.strokeColor}
+                fillColor={annStyle.fillColor}
+                lineWidth={annStyle.lineWidth}
+                opacity={annStyle.opacity}
+                strokeEnabled={annStyle.strokeEnabled}
+                fillEnabled={annStyle.fillEnabled}
+                onAddAnnotation={handleAddAnnotation}
+                onRemoveAnnotation={handleRemoveAnnotation}
+                enabled={!stampEditing}
+              />
+            )}
+            {viewMode === 'single' && !isGrid && activeTool === 'select' && pageAnns.length > 0 && (
+              <AnnotationOverlay
+                containerWidth={firstPageRect.w}
+                containerHeight={firstPageRect.h}
+                annotations={pageAnns}
+                activeTool="select"
+                strokeColor={annStyle.strokeColor}
+                fillColor={annStyle.fillColor}
+                lineWidth={annStyle.lineWidth}
+                opacity={annStyle.opacity}
+                strokeEnabled={annStyle.strokeEnabled}
+                fillEnabled={annStyle.fillEnabled}
+                onAddAnnotation={handleAddAnnotation}
+                onRemoveAnnotation={handleRemoveAnnotation}
+                enabled={true}
               />
             )}
           </div>
@@ -599,7 +648,7 @@ export default function PdfPreviewPanel({
   return (
     <div className="h-full flex flex-col bg-white" ref={panelRef} tabIndex={0} style={{ outline: 'none' }}>
       {/* ヘッダー */}
-      <div className="shrink-0 px-4 py-2.5 border-b border-gray-200 flex items-center gap-2">
+      <div className="shrink-0 px-3 py-1.5 border-b border-gray-200 flex items-center gap-2">
         <div className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
           {label}
         </div>
@@ -611,14 +660,14 @@ export default function PdfPreviewPanel({
         <div className="flex border border-gray-200 rounded overflow-hidden shrink-0">
           <button
             onClick={() => setViewMode('single')}
-            className={`px-2 py-1 text-[10px] font-medium ${viewMode === 'single' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+            className={`px-2 py-0.5 text-[10px] font-medium ${viewMode === 'single' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
             title="単一ページ表示"
           >
             1枚
           </button>
           <button
             onClick={() => setViewMode('grid')}
-            className={`px-2 py-1 text-[10px] font-medium ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+            className={`px-2 py-0.5 text-[10px] font-medium ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
             title="一覧表示（並び替え・複数選択）"
           >
             一覧
@@ -632,110 +681,81 @@ export default function PdfPreviewPanel({
             if (dataUrl) printPageImage(dataUrl, `${displayName} - ページ ${currentPage + 1}`);
           }}
           disabled={!pages[currentPage]}
-          className="shrink-0 text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-40"
+          className="shrink-0 text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-50 disabled:opacity-40"
           title="このページを印刷"
         >
-          🖨 印刷
+          印刷
         </button>
 
         <button
           onClick={onClose}
-          className="shrink-0 w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-base font-bold"
+          className="shrink-0 w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-bold"
           title="プレビューを閉じる"
         >
           ✕
         </button>
       </div>
 
-      {/* ツールバー */}
-      <div className="shrink-0 border-b border-gray-100 bg-gray-50">
-        <StampToolbar
-          stampEditing={stampEditing}
-          setStampEditing={setStampEditing}
-          pos={pos}
-          stampColor={stampColor}
-          setStampColor={setStampColor}
-          stampFontSize={stampFontSize}
-          setStampFontSize={setStampFontSize}
-          setStampStyleChanged={setStampStyleChanged}
-          anyStampChanged={anyStampChanged}
-          customStampPosition={customStampPosition}
-          settings={settings}
-          onSave={handleSaveStamp}
-          onReset={handleResetStamp}
-          onCancel={() => {
-            setStampEditing(false);
-            setPos(customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop });
-            setStampColor(settings.color);
-            setStampFontSize(settings.fontSize);
-            setPosChanged(false);
-            setStampStyleChanged(false);
-          }}
-          onStartEdit={() => { setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); if (viewMode === 'single') setCurrentPage(0); }}
-        />
+      {/* 統合ツールバー */}
+      <EditorToolbar
+        activeTool={activeTool}
+        setActiveTool={(t) => {
+          setActiveTool(t);
+          if (t !== 'select') {
+            setSelectedPages(new Set());
+            setEditConfirm(null);
+            if (viewMode !== 'single') setViewMode('single');
+          }
+        }}
+        style={annStyle}
+        onStyleChange={(patch) => setAnnStyle(prev => ({ ...prev, ...patch }))}
+        annotationCount={totalAnnotations}
+        onApplyAnnotations={handleApplyAnnotations}
+        onClearAnnotations={handleClearAnnotations}
 
-        <PageEditToolbar
-          viewMode={viewMode}
-          stampEditing={stampEditing}
-          totalPages={totalPages}
-          selectedPages={selectedPages}
-          selectedArr={selectedArr}
-          selectionSummary={selectionSummary}
-          canDelete={canDelete}
-          canSplit={canSplit}
-          singleSelected={singleSelected}
-          editProcessing={editProcessing}
-          editConfirm={editConfirm}
-          setEditConfirm={setEditConfirm}
-          onRotate={handleRotatePages}
-          onDelete={handleDeletePages}
-          onSplit={handleSplitPage}
-          onSelectAll={selectAll}
-          onDeselectAll={deselectAll}
-        />
+        stampEditing={stampEditing}
+        onStartStampEdit={() => { setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); setActiveTool('select'); if (viewMode === 'single') setCurrentPage(0); }}
+        onSaveStamp={handleSaveStamp}
+        onResetStamp={handleResetStamp}
+        onCancelStamp={() => {
+          setStampEditing(false);
+          setPos(customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop });
+          setStampColor(settings.color);
+          setStampFontSize(settings.fontSize);
+          setPosChanged(false);
+          setStampStyleChanged(false);
+        }}
+        anyStampChanged={anyStampChanged}
+        customStampPosition={customStampPosition}
+        pos={pos}
+        stampColor={stampColor}
+        setStampColor={setStampColor}
+        stampFontSize={stampFontSize}
+        setStampFontSize={setStampFontSize}
+        setStampStyleChanged={setStampStyleChanged}
 
-        {/* 墨消しツールバー */}
-        {!stampEditing && (
-          <div className="px-4 py-1.5 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-            {!redactionMode ? (
-              <button
-                onClick={() => { setRedactionMode(true); setViewMode('single'); setSelectedPages(new Set()); setEditConfirm(null); }}
-                className="text-xs text-gray-600 hover:text-gray-800 border border-gray-300 rounded px-2.5 py-1 hover:bg-gray-100 font-medium"
-              >
-                ■ 墨消し
-              </button>
-            ) : (
-              <>
-                <span className="text-xs text-gray-700 font-medium">■ 墨消しモード</span>
-                <span className="text-[10px] text-gray-500">
-                  {totalRedactions > 0 ? `${totalRedactions}箇所` : 'ドラッグで範囲選択'}
-                </span>
-                <div className="ml-auto flex items-center gap-1.5">
-                  {totalRedactions > 0 && (
-                    <button
-                      onClick={handleApplyRedactions}
-                      disabled={editProcessing}
-                      className="text-[10px] text-white bg-gray-800 hover:bg-gray-900 disabled:opacity-50 rounded px-2.5 py-0.5 font-medium"
-                    >
-                      適用 ({totalRedactions})
-                    </button>
-                  )}
-                  <button
-                    onClick={() => { setRedactionMode(false); setRedactionBoxes(new Map()); }}
-                    className="text-[10px] text-gray-400 hover:text-gray-600"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+        viewMode={viewMode}
+        totalPages={totalPages}
+        selectedPages={selectedPages}
+        selectedArr={selectedArr}
+        selectionSummary={selectionSummary}
+        canDelete={canDelete}
+        canSplit={canSplit}
+        singleSelected={singleSelected}
+        editProcessing={editProcessing}
+        editConfirm={editConfirm}
+        setEditConfirm={setEditConfirm}
+        onRotate={handleRotatePages}
+        onDelete={handleDeletePages}
+        onSplit={handleSplitPage}
+        onSelectAll={selectAll}
+        onDeselectAll={deselectAll}
+        settings={settings}
+      />
 
       {/* エラーバナー */}
       {editError && (
-        <div className="shrink-0 mx-4 mt-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
+        <div className="shrink-0 mx-3 mt-1 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
           <span className="text-red-500 text-xs">⚠</span>
           <p className="text-xs text-red-700 flex-1">{editError}</p>
           <button onClick={() => setEditError(null)} className="text-red-400 hover:text-red-600 text-xs">✕</button>
@@ -761,28 +781,42 @@ export default function PdfPreviewPanel({
           </div>
         ) : viewMode === 'single' ? (
           /* ── 単一ページ表示 ── */
-          <div className="p-4">
+          <div className="p-3">
             {pages[currentPage] && renderPageThumb(currentPage, pages[currentPage], false)}
 
             {/* ページ送りコントロール */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-3 mt-3">
+              <div className="flex items-center justify-center gap-3 mt-2">
+                <button
+                  onClick={() => setCurrentPage(0)}
+                  disabled={currentPage <= 0}
+                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm text-xs"
+                >
+                  «
+                </button>
                 <button
                   onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                   disabled={currentPage <= 0}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
                 >
                   ‹
                 </button>
-                <span className="text-sm text-gray-600 font-medium min-w-[80px] text-center">
+                <span className="text-xs text-gray-600 font-medium min-w-[60px] text-center">
                   {currentPage + 1} / {totalPages}
                 </span>
                 <button
                   onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                   disabled={currentPage >= totalPages - 1}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
                 >
                   ›
+                </button>
+                <button
+                  onClick={() => setCurrentPage(totalPages - 1)}
+                  disabled={currentPage >= totalPages - 1}
+                  className="w-7 h-7 flex items-center justify-center rounded-full bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-sm text-xs"
+                >
+                  »
                 </button>
               </div>
             )}
@@ -834,8 +868,8 @@ export default function PdfPreviewPanel({
 
       {/* フッター */}
       {totalPages > 0 && (
-        <div className="shrink-0 px-4 py-2 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
-          <span>{totalPages} ページ</span>
+        <div className="shrink-0 px-3 py-1 border-t border-gray-200 flex items-center justify-between text-[10px] text-gray-500">
+          <span>{totalPages}ページ</span>
           <span className="text-gray-400">{(file.size / 1024).toFixed(0)} KB</span>
         </div>
       )}
