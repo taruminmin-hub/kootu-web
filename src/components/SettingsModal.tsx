@@ -33,7 +33,6 @@ const FILENAME_JOIN_FORMATS: { value: FileNameJoinFormat; label: string }[] = [
 const COLOR_OPTIONS: { value: StampColor; label: string; activeCls: string }[] = [
   { value: 'red',   label: '赤', activeCls: 'bg-red-100 border-red-500 text-red-700' },
   { value: 'blue',  label: '青', activeCls: 'bg-blue-100 border-blue-500 text-blue-700' },
-  { value: 'green', label: '緑', activeCls: 'bg-green-100 border-green-600 text-green-700' },
   { value: 'black', label: '黒', activeCls: 'bg-gray-100 border-gray-600 text-gray-700' },
 ];
 

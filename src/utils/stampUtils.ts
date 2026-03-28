@@ -71,7 +71,7 @@ export function generateFileNameNumber(
 // ─── Canvas スタンプ画像生成 ──────────────────────────────────
 
 function colorToHex(color: StampColor): string {
-  return color === 'red' ? '#CC0000' : color === 'blue' ? '#0055CC' : color === 'green' ? '#007733' : '#000000';
+  return color === 'red' ? '#CC0000' : color === 'blue' ? '#0055CC' : '#000000';
 }
 
 /** スタンプ画像のキャッシュ（同じパラメータで再生成を防止） */

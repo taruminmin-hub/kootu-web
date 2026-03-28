@@ -587,15 +587,15 @@ export default function PdfPreviewPanel({
               {/* 色 */}
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-gray-500">色:</span>
-                {(['red', 'blue', 'green', 'black'] as StampColor[]).map(c => (
+                {(['red', 'blue', 'black'] as StampColor[]).map(c => (
                   <button
                     key={c}
                     onClick={() => { setStampColor(c); setStampStyleChanged(true); }}
                     className={`w-5 h-5 rounded-full border-2 transition-all ${
                       stampColor === c ? 'border-gray-800 scale-110' : 'border-gray-300 hover:border-gray-500'
                     }`}
-                    style={{ backgroundColor: c === 'red' ? '#dc2626' : c === 'blue' ? '#2563eb' : c === 'green' ? '#16a34a' : '#1f2937' }}
-                    title={c === 'red' ? '赤' : c === 'blue' ? '青' : c === 'green' ? '緑' : '黒'}
+                    style={{ backgroundColor: c === 'red' ? '#dc2626' : c === 'blue' ? '#2563eb' : '#1f2937' }}
+                    title={c === 'red' ? '赤' : c === 'blue' ? '青' : '黒'}
                   />
                 ))}
               </div>
