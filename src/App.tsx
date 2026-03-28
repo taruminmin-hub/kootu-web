@@ -16,7 +16,6 @@ import SettingsModal from './components/SettingsModal';
 import ProcessingOverlay from './components/ProcessingOverlay';
 import ConfirmOutputModal from './components/ConfirmOutputModal';
 import ResultModal from './components/ResultModal';
-import PdfEditModal from './components/PdfEditModal';
 import AiSplitModal from './components/AiSplitModal';
 import AiNameModal from './components/AiNameModal';
 import PdfPreviewPanel from './components/PdfPreviewPanel';
@@ -66,7 +65,6 @@ export default function App() {
     customStampPosition?: import('./types').StampPosition;
     rotation: 0 | 90 | 180 | 270;
   } | null>(null);
-  const [showPdfEditFromPreview, setShowPdfEditFromPreview] = useState(false);
   const [mainAreaDragOver, setMainAreaDragOver] = useState(false);
 
   // カスタム符号が空の場合に処理を無効化
@@ -180,6 +178,31 @@ export default function App() {
       },
     );
   }, []);
+
+  const handlePreviewReplaceFile = useCallback((newFile: File) => {
+    if (!previewFile) return;
+    const { replaceFile } = useStore.getState();
+    for (const g of groups) {
+      if (g.mainFile.id === previewFile.fileId) {
+        replaceFile(g.id, g.mainFile.id, newFile);
+        setPreviewFile({ ...previewFile, file: newFile });
+        return;
+      }
+      const branch = g.branchFiles.find(f => f.id === previewFile.fileId);
+      if (branch) {
+        replaceFile(g.id, branch.id, newFile);
+        setPreviewFile({ ...previewFile, file: newFile });
+        return;
+      }
+    }
+  }, [previewFile, groups]);
+
+  const handlePreviewSplitFile = useCallback((file1: File, file2: File) => {
+    if (!previewFile) return;
+    const { splitFileIntoTwo } = useStore.getState();
+    splitFileIntoTwo(previewFile.groupId, previewFile.fileId, file1, file2);
+    setPreviewFile(null);
+  }, [previewFile]);
 
   const toggleSelect = useCallback((fileId: string) => {
     setSelectedIds((prev) => {
@@ -534,7 +557,8 @@ export default function App() {
                 rotation={previewFile.rotation}
                 settings={settings}
                 onClose={() => setPreviewFile(null)}
-                onOpenEdit={() => setShowPdfEditFromPreview(true)}
+                onReplaceFile={handlePreviewReplaceFile}
+                onSplitFile={handlePreviewSplitFile}
                 onSavePosition={(pos) => {
                   const { setCustomStampPosition } = useStore.getState();
                   setCustomStampPosition(previewFile.groupId, previewFile.fileId, pos);
@@ -560,7 +584,8 @@ export default function App() {
                 rotation={previewFile.rotation}
                 settings={settings}
                 onClose={() => setPreviewFile(null)}
-                onOpenEdit={() => setShowPdfEditFromPreview(true)}
+                onReplaceFile={handlePreviewReplaceFile}
+                onSplitFile={handlePreviewSplitFile}
                 onSavePosition={(pos) => {
                   const { setCustomStampPosition } = useStore.getState();
                   setCustomStampPosition(previewFile.groupId, previewFile.fileId, pos);
@@ -578,30 +603,6 @@ export default function App() {
       </div>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showPdfEditFromPreview && previewFile && (
-        <PdfEditModal
-          file={previewFile.file}
-          onReplaceFile={(newFile) => {
-            // ファイルを置き換えてプレビューも更新
-            const { replaceFile } = useStore.getState();
-            for (const g of groups) {
-              if (g.mainFile.id === previewFile.fileId) {
-                replaceFile(g.id, g.mainFile.id, newFile);
-                setPreviewFile({ ...previewFile, file: newFile });
-                break;
-              }
-              const branch = g.branchFiles.find(f => f.id === previewFile.fileId);
-              if (branch) {
-                replaceFile(g.id, branch.id, newFile);
-                setPreviewFile({ ...previewFile, file: newFile });
-                break;
-              }
-            }
-          }}
-          onSplitFile={() => {}}
-          onClose={() => setShowPdfEditFromPreview(false)}
-        />
-      )}
       {processing && <ProcessingOverlay current={progress.current} total={progress.total} />}
       {converting && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
