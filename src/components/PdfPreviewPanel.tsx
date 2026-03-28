@@ -11,7 +11,8 @@ import { createStampImage } from '../utils/stampUtils';
 import {
   reorderPages, rotateMultiplePages, deleteMultiplePages, splitPdfAfterPage,
 } from '../utils/pdfEditUtils';
-import type { StampPosition, Settings } from '../types';
+import { useStore } from '../store/useStore';
+import type { StampPosition, Settings, StampColor } from '../types';
 
 interface Props {
   file: File;
@@ -60,16 +61,20 @@ export default function PdfPreviewPanel({
   const displayName = customOutputName?.trim() || file.name.replace(/\.[^.]+$/, '');
   const totalPages = pages.length;
 
-  // ── スタンプ位置調整 ──
+  // ── スタンプ編集 ──
   const [pos, setPos] = useState<StampPosition>(
     customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop },
   );
   const [stampEditing, setStampEditing] = useState(false);
   const [posChanged, setPosChanged] = useState(false);
+  const [stampColor, setStampColor] = useState<StampColor>(settings.color);
+  const [stampFontSize, setStampFontSize] = useState(settings.fontSize);
+  const [stampStyleChanged, setStampStyleChanged] = useState(false);
 
   // ── ページ選択（複数対応） ──
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
   const lastClickedRef = useRef<number | null>(null);
+  const selectionAnchorRef = useRef<number | null>(null); // Shift+矢印の基準点
   const panelRef = useRef<HTMLDivElement>(null);
 
   // ── 編集状態 ──
@@ -79,6 +84,7 @@ export default function PdfPreviewPanel({
 
   // ── ドラッグ中のページ ──
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // ページ数変動時に選択/currentPageを範囲内に維持
   useEffect(() => {
@@ -141,7 +147,7 @@ export default function PdfPreviewPanel({
   useEffect(() => {
     let cancelled = false;
     let prevUrl: string | null = null;
-    createStampImage(label, settings.fontSize, settings.color, settings.whiteBackground, settings.border)
+    createStampImage(label, stampFontSize, stampColor, settings.whiteBackground, settings.border)
       .then((bytes) => {
         if (cancelled) return;
         const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'image/png' });
@@ -161,7 +167,7 @@ export default function PdfPreviewPanel({
       cancelled = true;
       if (prevUrl) URL.revokeObjectURL(prevUrl);
     };
-  }, [label, settings.fontSize, settings.color, settings.whiteBackground, settings.border]);
+  }, [label, stampFontSize, stampColor, settings.whiteBackground, settings.border]);
 
   // ── スタンプ位置ドラッグ ──
   const stampDragging = useRef(false);
@@ -207,18 +213,27 @@ export default function PdfPreviewPanel({
   const stampLeft = firstPageRect.w - (pos.marginRight + stampPx.w) * scale;
   const stampTop = pos.marginTop * scale;
 
-  const handleSavePos = () => {
+  const handleSaveStamp = () => {
     onSavePosition(pos);
+    if (stampStyleChanged) {
+      const { updateSettings } = useStore.getState();
+      updateSettings({ color: stampColor, fontSize: stampFontSize });
+    }
     setPosChanged(false);
+    setStampStyleChanged(false);
     setStampEditing(false);
   };
-  const handleResetPos = () => {
+  const handleResetStamp = () => {
     const defaultPos = { marginRight: settings.marginRight, marginTop: settings.marginTop };
     setPos(defaultPos);
+    setStampColor(settings.color);
+    setStampFontSize(settings.fontSize);
     onResetPosition();
     setPosChanged(false);
+    setStampStyleChanged(false);
     setStampEditing(false);
   };
+  const anyStampChanged = posChanged || stampStyleChanged;
 
   // ── ページクリック（複数選択対応） ──
   const handlePageClick = useCallback((pageIndex: number, e: React.MouseEvent) => {
@@ -230,6 +245,7 @@ export default function PdfPreviewPanel({
         const next = new Set(prev);
         if (next.has(pageIndex)) next.delete(pageIndex); else next.add(pageIndex);
         lastClickedRef.current = pageIndex;
+        selectionAnchorRef.current = pageIndex;
         return next;
       }
       if (e.shiftKey && lastClickedRef.current !== null) {
@@ -240,12 +256,13 @@ export default function PdfPreviewPanel({
         return next;
       }
       lastClickedRef.current = pageIndex;
+      selectionAnchorRef.current = pageIndex;
       if (prev.size === 1 && prev.has(pageIndex)) return new Set();
       return new Set([pageIndex]);
     });
   }, [stampEditing]);
 
-  // ── Shift+矢印キーで選択拡張 ──
+  // ── 矢印キー操作 ──
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
@@ -254,54 +271,69 @@ export default function PdfPreviewPanel({
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
 
       const isNext = e.key === 'ArrowDown' || e.key === 'ArrowRight';
-      const isPrev = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
-      if (!isNext && !isPrev) return;
 
       e.preventDefault();
 
       if (viewMode === 'single' && !e.shiftKey) {
-        // 単一表示モードでは矢印キーでページ送り
-        setCurrentPage(prev => {
-          const next = isNext ? Math.min(prev + 1, totalPages - 1) : Math.max(prev - 1, 0);
-          return next;
-        });
+        setCurrentPage(prev => isNext ? Math.min(prev + 1, totalPages - 1) : Math.max(prev - 1, 0));
         return;
       }
 
-      // 基準点を決定
-      const anchor = lastClickedRef.current ?? (selectedPages.size > 0 ? Math.min(...selectedPages) : 0);
-      const nextIdx = isNext ? Math.min(anchor + 1, totalPages - 1) : Math.max(anchor - 1, 0);
+      // 現在のカーソル位置（lastClicked）
+      const cursor = lastClickedRef.current ?? 0;
+      const nextCursor = isNext ? Math.min(cursor + 1, totalPages - 1) : Math.max(cursor - 1, 0);
 
       if (e.shiftKey) {
-        // Shift+矢印: 選択範囲を拡張
-        setSelectedPages(prev => {
-          const next = new Set(prev);
-          next.add(nextIdx);
-          lastClickedRef.current = nextIdx;
-          return next;
-        });
-        // グリッドモードの場合はスクロールで見えるようにする
-        if (viewMode === 'grid') {
-          setTimeout(() => {
-            const thumb = el.querySelector(`[data-page-index="${nextIdx}"]`);
-            thumb?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          }, 0);
+        // Shift+矢印: アンカーからカーソルまでの範囲を選択
+        // アンカーが未設定なら現在のカーソルをアンカーにする
+        if (selectionAnchorRef.current === null) {
+          selectionAnchorRef.current = cursor;
         }
+        const anchor = selectionAnchorRef.current;
+        const from = Math.min(anchor, nextCursor);
+        const to = Math.max(anchor, nextCursor);
+        const next = new Set<number>();
+        for (let i = from; i <= to; i++) next.add(i);
+        lastClickedRef.current = nextCursor;
+        setSelectedPages(next);
       } else {
-        // 矢印のみ（グリッドモード）: 単一選択を移動
-        lastClickedRef.current = nextIdx;
-        setSelectedPages(new Set([nextIdx]));
-        if (viewMode === 'grid') {
-          setTimeout(() => {
-            const thumb = el.querySelector(`[data-page-index="${nextIdx}"]`);
-            thumb?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          }, 0);
-        }
+        // 矢印のみ: 単一選択を移動
+        lastClickedRef.current = nextCursor;
+        selectionAnchorRef.current = nextCursor;
+        setSelectedPages(new Set([nextCursor]));
       }
+
+      // スクロールで見えるようにする
+      setTimeout(() => {
+        const thumb = el.querySelector(`[data-page-index="${nextCursor}"]`);
+        thumb?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }, 0);
     };
     el.addEventListener('keydown', handler);
     return () => el.removeEventListener('keydown', handler);
-  }, [stampEditing, totalPages, selectedPages, viewMode]);
+  }, [stampEditing, totalPages, viewMode]);
+
+  // ── 単一ページモード: スクロールでページ送り ──
+  const wheelCooldown = useRef(false);
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || viewMode !== 'single') return;
+    const handler = (e: WheelEvent) => {
+      if (wheelCooldown.current) return;
+      // 小さなスクロール量は無視（トラックパッドの慣性）
+      if (Math.abs(e.deltaY) < 30) return;
+      e.preventDefault();
+      wheelCooldown.current = true;
+      setTimeout(() => { wheelCooldown.current = false; }, 200);
+      if (e.deltaY > 0) {
+        setCurrentPage(p => Math.min(totalPages - 1, p + 1));
+      } else {
+        setCurrentPage(p => Math.max(0, p - 1));
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [viewMode, totalPages]);
 
   const selectAll = useCallback(() => {
     setSelectedPages(new Set(Array.from({ length: totalPages }, (_, i) => i)));
@@ -525,26 +557,66 @@ export default function PdfPreviewPanel({
             </button>
           ) : (
             <>
-              <span className="text-xs text-orange-600 font-medium">📍 調整中</span>
-              <span className="text-[10px] text-gray-400">— 1ページ目をクリック/ドラッグ</span>
+              <span className="text-xs text-orange-600 font-medium">📍 スタンプ編集</span>
               <div className="ml-auto flex items-center gap-1.5">
-                <span className="text-[10px] text-gray-500">
-                  上: {pos.marginTop}pt ({(pos.marginTop * 0.3528).toFixed(1)}mm) / 右: {pos.marginRight}pt ({(pos.marginRight * 0.3528).toFixed(1)}mm)
-                </span>
-                <button onClick={handleResetPos} className="text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100">
+                <button onClick={handleResetStamp} className="text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100">
                   リセット
                 </button>
-                <button onClick={handleSavePos} disabled={!posChanged} className="text-[10px] text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 rounded px-2.5 py-0.5 font-medium">
+                <button onClick={handleSaveStamp} disabled={!anyStampChanged} className="text-[10px] text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 rounded px-2.5 py-0.5 font-medium">
                   保存
                 </button>
                 <button
-                  onClick={() => { setStampEditing(false); setPos(customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop }); setPosChanged(false); }}
+                  onClick={() => {
+                    setStampEditing(false);
+                    setPos(customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop });
+                    setStampColor(settings.color);
+                    setStampFontSize(settings.fontSize);
+                    setPosChanged(false);
+                    setStampStyleChanged(false);
+                  }}
                   className="text-[10px] text-gray-400 hover:text-gray-600"
                 >
                   ✕
                 </button>
               </div>
             </>
+          )}
+          {/* スタンプ編集: 色・サイズ・位置 */}
+          {stampEditing && (
+            <div className="w-full flex items-center gap-3 mt-1 flex-wrap">
+              {/* 色 */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-500">色:</span>
+                {(['red', 'blue', 'green', 'black'] as StampColor[]).map(c => (
+                  <button
+                    key={c}
+                    onClick={() => { setStampColor(c); setStampStyleChanged(true); }}
+                    className={`w-5 h-5 rounded-full border-2 transition-all ${
+                      stampColor === c ? 'border-gray-800 scale-110' : 'border-gray-300 hover:border-gray-500'
+                    }`}
+                    style={{ backgroundColor: c === 'red' ? '#dc2626' : c === 'blue' ? '#2563eb' : c === 'green' ? '#16a34a' : '#1f2937' }}
+                    title={c === 'red' ? '赤' : c === 'blue' ? '青' : c === 'green' ? '緑' : '黒'}
+                  />
+                ))}
+              </div>
+              {/* サイズ */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-500">サイズ:</span>
+                <button
+                  onClick={() => { setStampFontSize(f => Math.max(6, f - 1)); setStampStyleChanged(true); }}
+                  className="w-5 h-5 flex items-center justify-center border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100"
+                >−</button>
+                <span className="text-[10px] text-gray-700 font-medium w-8 text-center">{stampFontSize}pt</span>
+                <button
+                  onClick={() => { setStampFontSize(f => Math.min(36, f + 1)); setStampStyleChanged(true); }}
+                  className="w-5 h-5 flex items-center justify-center border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100"
+                >+</button>
+              </div>
+              {/* 位置 */}
+              <span className="text-[10px] text-gray-400">
+                位置: 上{pos.marginTop}pt / 右{pos.marginRight}pt — ドラッグで移動
+              </span>
+            </div>
           )}
           {!!customStampPosition && !stampEditing && (
             <span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">位置調整済</span>
@@ -660,7 +732,7 @@ export default function PdfPreviewPanel({
       )}
 
       {/* プレビュー本体 */}
-      <div className="flex-1 overflow-y-auto overscroll-y-contain bg-gray-100 relative">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overscroll-y-contain bg-gray-100 relative">
         {/* 処理中オーバーレイ */}
         {editProcessing && (
           <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
