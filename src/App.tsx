@@ -60,7 +60,12 @@ export default function App() {
   const [aiSplitFile, setAiSplitFile] = useState<File | null>(null);
   const [showAiName, setShowAiName] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<{ fileId: string; file: File; label: string; customOutputName?: string } | null>(null);
+  const [previewFile, setPreviewFile] = useState<{
+    fileId: string; file: File; label: string;
+    customOutputName?: string; groupId: string;
+    customStampPosition?: import('./types').StampPosition;
+    rotation: 0 | 90 | 180 | 270;
+  } | null>(null);
   const [showPdfEditFromPreview, setShowPdfEditFromPreview] = useState(false);
 
   // カスタム符号が空の場合に処理を無効化
@@ -153,9 +158,18 @@ export default function App() {
     input.click();
   }, []);
 
-  const handlePreviewSelect = useCallback((fileId: string, file: File, label: string, customOutputName?: string) => {
+  const handlePreviewSelect = useCallback((
+    fileId: string, file: File, label: string, customOutputName?: string,
+    groupId?: string, customStampPosition?: import('./types').StampPosition,
+    rotation?: 0 | 90 | 180 | 270,
+  ) => {
     setPreviewFile(prev =>
-      prev?.fileId === fileId ? null : { fileId, file, label, customOutputName },
+      prev?.fileId === fileId ? null : {
+        fileId, file, label, customOutputName,
+        groupId: groupId ?? '',
+        customStampPosition,
+        rotation: rotation ?? 0,
+      },
     );
   }, []);
 
@@ -432,8 +446,21 @@ export default function App() {
                 file={previewFile.file}
                 label={previewFile.label}
                 customOutputName={previewFile.customOutputName}
+                customStampPosition={previewFile.customStampPosition}
+                rotation={previewFile.rotation}
+                settings={settings}
                 onClose={() => setPreviewFile(null)}
                 onOpenEdit={() => setShowPdfEditFromPreview(true)}
+                onSavePosition={(pos) => {
+                  const { setCustomStampPosition } = useStore.getState();
+                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, pos);
+                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
+                }}
+                onResetPosition={() => {
+                  const { setCustomStampPosition } = useStore.getState();
+                  setCustomStampPosition(previewFile.groupId, previewFile.fileId, undefined);
+                  setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
+                }}
               />
             </aside>
           )}

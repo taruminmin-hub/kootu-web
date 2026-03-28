@@ -19,7 +19,7 @@ interface Props {
   onToggleSelect: (fileId: string) => void;
   draggingGroupId?: string | null;
   previewingFileId?: string | null;
-  onPreviewSelect?: (fileId: string, file: File, label: string, customOutputName?: string) => void;
+  onPreviewSelect?: (fileId: string, file: File, label: string, customOutputName?: string, groupId?: string, customStampPosition?: import('../types').StampPosition, rotation?: 0 | 90 | 180 | 270) => void;
 }
 
 /** 枝番ファイルをドラッグで並び替えるためのラッパー */
@@ -180,7 +180,7 @@ export default function FileGroupRow({
           isSelected={selectedIds.has(group.mainFile.id)}
           isPreviewing={previewingFileId === group.mainFile.id}
           onToggleSelect={() => onToggleSelect(group.mainFile.id)}
-          onPreviewSelect={() => onPreviewSelect?.(group.mainFile.id, group.mainFile.file, mainLabel, group.mainFile.customOutputName)}
+          onPreviewSelect={() => onPreviewSelect?.(group.mainFile.id, group.mainFile.file, mainLabel, group.mainFile.customOutputName, group.id, group.mainFile.customStampPosition, group.mainFile.rotation)}
           onRemove={() => removeGroup(group.id)}
           onMakeBranch={!isFirst ? () => makeBranch(group.id) : undefined}
           onRenameOutput={(name) => setCustomOutputName(group.id, group.mainFile.id, name)}
@@ -216,7 +216,7 @@ export default function FileGroupRow({
                     isSelected={selectedIds.has(entry.id)}
                     isPreviewing={previewingFileId === entry.id}
                     onToggleSelect={() => onToggleSelect(entry.id)}
-                    onPreviewSelect={() => onPreviewSelect?.(entry.id, entry.file, branchLabels[j], entry.customOutputName)}
+                    onPreviewSelect={() => onPreviewSelect?.(entry.id, entry.file, branchLabels[j], entry.customOutputName, group.id, entry.customStampPosition, entry.rotation)}
                     onRemove={() => removeBranch(group.id, entry.id)}
                     onMakeMain={() => makeMain(group.id, entry.id)}
                     onRenameOutput={(name) => setCustomOutputName(group.id, entry.id, name)}

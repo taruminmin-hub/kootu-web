@@ -1,14 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePdfThumbnail } from '../hooks/usePdfThumbnail';
-import StampPositionModal from './StampPositionModal';
 import PdfEditModal from './PdfEditModal';
-import type { StampPosition, Settings } from '../types';
+import type { Settings } from '../types';
 
 interface Props {
   label: string;
   file: File;
   customOutputName?: string;
-  customStampPosition?: StampPosition;
+  customStampPosition?: import('../types').StampPosition;
   rotation: 0 | 90 | 180 | 270;
   isBranch: boolean;
   settings: Settings;
@@ -21,7 +20,7 @@ interface Props {
   onMakeBranch?: () => void;
   onMakeMain?: () => void;
   onRenameOutput?: (name: string) => void;
-  onSavePosition?: (pos: StampPosition) => void;
+  onSavePosition?: (pos: import('../types').StampPosition) => void;
   onResetPosition?: () => void;
   onRotate?: (rotation: 0 | 90 | 180 | 270) => void;
   onReplaceFile?: (newFile: File) => void;
@@ -29,15 +28,14 @@ interface Props {
 }
 
 export default function FileCard({
-  label, file, customOutputName, customStampPosition, rotation, isBranch, settings,
+  label, file, customOutputName, customStampPosition, rotation, isBranch,
   selectionMode, isSelected, isPreviewing, onToggleSelect, onPreviewSelect,
   onRemove, onMakeBranch, onMakeMain,
-  onRenameOutput, onSavePosition, onResetPosition, onRotate,
+  onRenameOutput, onRotate,
   onReplaceFile, onSplitFile,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  const [showPositionModal, setShowPositionModal] = useState(false);
   const [showPdfEdit, setShowPdfEdit] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const thumbnail = usePdfThumbnail(file, 160);
@@ -102,7 +100,7 @@ export default function FileCard({
         : isPreviewing ? 'border-blue-500 ring-2 ring-blue-200 shadow-md'
         : 'border-gray-200'
       }`}>
-        {/* サムネイル（クリックでプレビューモーダルを開く） */}
+        {/* サムネイル */}
         <div
           className={`h-[140px] bg-gray-100 flex items-center justify-center overflow-hidden relative group ${
             selectionMode ? 'cursor-pointer' : 'cursor-zoom-in'
@@ -128,7 +126,7 @@ export default function FileCard({
             </div>
           )}
 
-          {/* ホバー時のプレビューオーバーレイ（選択モード以外） */}
+          {/* ホバー時のプレビューオーバーレイ */}
           {!selectionMode && (
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-all pointer-events-none">
               <span className="text-white text-xs font-medium bg-black/60 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
@@ -137,23 +135,19 @@ export default function FileCard({
             </div>
           )}
 
-          {/* スタンプラベル（右上オーバーレイ） */}
+          {/* スタンプラベル（右上） */}
           <div className="absolute top-1 right-1 bg-red-600 text-white text-[9px] font-bold px-1 py-0.5 rounded leading-none">
             {label}
           </div>
 
           {/* 回転ボタン */}
           <div className="absolute bottom-1 right-1 flex gap-0.5">
-            <button
-              onClick={rotateCCW}
+            <button onClick={rotateCCW}
               className="bg-black/40 hover:bg-black/60 text-white rounded text-[10px] w-5 h-5 flex items-center justify-center leading-none"
-              title="反時計回りに90°回転"
-            >↺</button>
-            <button
-              onClick={rotateCW}
+              title="反時計回りに90°回転">↺</button>
+            <button onClick={rotateCW}
               className="bg-black/40 hover:bg-black/60 text-white rounded text-[10px] w-5 h-5 flex items-center justify-center leading-none"
-              title="時計回りに90°回転"
-            >↻</button>
+              title="時計回りに90°回転">↻</button>
           </div>
 
           {/* カスタム位置バッジ */}
@@ -186,7 +180,6 @@ export default function FileCard({
 
         {/* ファイル情報エリア */}
         <div className="p-2 flex flex-col gap-1.5">
-          {/* ファイル名（ダブルクリックで編集） */}
           {editing ? (
             <input
               ref={inputRef}
@@ -212,7 +205,7 @@ export default function FileCard({
             </div>
           )}
 
-          {/* アクションボタン行1 */}
+          {/* アクションボタン */}
           <div className="flex items-center gap-1">
             {isBranch ? (
               <button onClick={onMakeMain}
@@ -227,46 +220,18 @@ export default function FileCard({
                 </button>
               )
             )}
+            <button onClick={startEdit}
+              className="text-[10px] text-gray-500 hover:text-blue-600 border border-gray-200 rounded px-1 py-0.5"
+              title="出力ファイル名を編集">
+              ✏
+            </button>
             <button onClick={onRemove}
               className="ml-auto text-gray-400 hover:text-red-500 text-xs" title="削除">
               🗑
             </button>
           </div>
-
-          {/* アクションボタン行2 */}
-          <div className="flex gap-1">
-            <button onClick={startEdit}
-              className="flex-1 text-[10px] text-gray-500 hover:text-blue-600 border border-gray-200 rounded px-1 py-0.5 text-center"
-              title="出力ファイル名を編集">
-              ✏ ファイル名
-            </button>
-            <button
-              onClick={() => setShowPositionModal(true)}
-              className={`flex-1 text-[10px] border rounded px-1 py-0.5 text-center ${
-                hasCustomPos
-                  ? 'text-orange-600 border-orange-300 hover:bg-orange-50'
-                  : 'text-gray-500 border-gray-200 hover:text-blue-600'
-              }`}
-              title="スタンプ位置を調整"
-            >
-              📍 スタンプ位置
-            </button>
-          </div>
         </div>
       </div>
-
-      {showPositionModal && (
-        <StampPositionModal
-          file={file}
-          stampLabel={label}
-          settings={settings}
-          initialPosition={customStampPosition}
-          rotation={rotation}
-          onSave={(pos) => { onSavePosition?.(pos); }}
-          onReset={() => { onResetPosition?.(); }}
-          onClose={() => setShowPositionModal(false)}
-        />
-      )}
 
       {showPdfEdit && (
         <PdfEditModal
