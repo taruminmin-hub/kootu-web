@@ -1,12 +1,32 @@
 import { PDFDocument } from 'pdf-lib';
-import type { FileGroup, Settings } from '../types';
+import type { FileGroup, Settings, StampPosition, StampColor } from '../types';
 import { processAllFiles } from './pdfProcessor';
+import { createStampImage } from './stampUtils';
+
+export interface PrintStampOptions {
+  /** スタンプに表示するテキスト（例: "甲第1号証"） */
+  stampText: string;
+  /** スタンプ位置 */
+  position: StampPosition;
+  /** フォントサイズ */
+  fontSize: number;
+  /** 色 */
+  color: StampColor;
+  /** 白背景 */
+  whiteBackground: boolean;
+  /** 枠線 */
+  border: boolean;
+}
 
 /**
- * PDFファイルの指定ページのみを抽出して新しいウィンドウで印刷する。
- * 元PDFから該当ページだけをコピーしたPDFを生成するため、高品質な印刷が可能。
+ * PDFファイルの指定ページにスタンプを付与して新しいウィンドウで印刷する。
+ * 元PDFから該当ページだけをコピーし、1ページ目ならスタンプを描画してPDF品質で印刷。
  */
-export async function printPdfPage(file: File, pageIndex: number): Promise<void> {
+export async function printPdfPage(
+  file: File,
+  pageIndex: number,
+  stamp?: PrintStampOptions,
+): Promise<void> {
   const win = window.open('', '_blank');
   if (!win) {
     alert('ポップアップがブロックされました。ブラウザの設定を確認してください。');
@@ -19,6 +39,27 @@ export async function printPdfPage(file: File, pageIndex: number): Promise<void>
     const doc = await PDFDocument.create();
     const [page] = await doc.copyPages(src, [pageIndex]);
     doc.addPage(page);
+
+    // 1ページ目（pageIndex === 0）の場合、スタンプを描画
+    if (pageIndex === 0 && stamp) {
+      const imgBytes = await createStampImage(
+        stamp.stampText, stamp.fontSize, stamp.color,
+        stamp.whiteBackground, stamp.border,
+      );
+      const img = await doc.embedPng(imgBytes);
+      const { width: iw, height: ih } = img.size();
+      const displayW = iw / 3;
+      const displayH = ih / 3;
+      const printedPage = doc.getPage(0);
+      const { width: pw, height: ph } = printedPage.getSize();
+      printedPage.drawImage(img, {
+        x: pw - displayW - stamp.position.marginRight,
+        y: ph - displayH - stamp.position.marginTop,
+        width: displayW,
+        height: displayH,
+      });
+    }
+
     const pdfBytes = await doc.save();
     const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
