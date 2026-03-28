@@ -71,6 +71,59 @@ export async function splitPdfAfterPage(
 }
 
 /**
+ * PDFのページ順序を入れ替えた新しいFileを返す。
+ * newOrder[i] = 新しい i 番目に配置する元ページのインデックス
+ */
+export async function reorderPages(
+  file: File,
+  newOrder: number[],
+): Promise<File> {
+  const bytes = await file.arrayBuffer();
+  const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const doc = await PDFDocument.create();
+  const copiedPages = await doc.copyPages(src, newOrder);
+  for (const p of copiedPages) doc.addPage(p);
+  const newBytes = await doc.save();
+  return new File([newBytes.buffer as ArrayBuffer], file.name, { type: 'application/pdf' });
+}
+
+/**
+ * 複数ページを一括で時計回り90°回転させた新しいFileを返す。
+ */
+export async function rotateMultiplePages(
+  file: File,
+  pageIndices: number[],
+): Promise<File> {
+  const bytes = await file.arrayBuffer();
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  for (const idx of pageIndices) {
+    const page = doc.getPage(idx);
+    const current = page.getRotation().angle;
+    const next = ((current + 90) % 360 + 360) % 360;
+    page.setRotation(degrees(next));
+  }
+  const newBytes = await doc.save();
+  return new File([newBytes.buffer as ArrayBuffer], file.name, { type: 'application/pdf' });
+}
+
+/**
+ * 複数ページを一括削除した新しいFileを返す。
+ * 全ページ削除は許可しない（呼び出し元で防御すること）。
+ */
+export async function deleteMultiplePages(
+  file: File,
+  pageIndices: number[],
+): Promise<File> {
+  const bytes = await file.arrayBuffer();
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  // インデックスのずれを防ぐため降順で削除
+  const sorted = [...pageIndices].sort((a, b) => b - a);
+  for (const idx of sorted) doc.removePage(idx);
+  const newBytes = await doc.save();
+  return new File([newBytes.buffer as ArrayBuffer], file.name, { type: 'application/pdf' });
+}
+
+/**
  * PDF を複数のセグメントに分割する。
  * segments: [{ startPage, endPage, name }] (0始まり、endPage は inclusive)
  */
