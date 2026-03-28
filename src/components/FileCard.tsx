@@ -14,7 +14,9 @@ interface Props {
   settings: Settings;
   selectionMode?: boolean;
   isSelected?: boolean;
+  isPreviewing?: boolean;
   onToggleSelect?: () => void;
+  onPreviewSelect?: () => void;
   onRemove: () => void;
   onMakeBranch?: () => void;
   onMakeMain?: () => void;
@@ -28,7 +30,7 @@ interface Props {
 
 export default function FileCard({
   label, file, customOutputName, customStampPosition, rotation, isBranch, settings,
-  selectionMode, isSelected, onToggleSelect,
+  selectionMode, isSelected, isPreviewing, onToggleSelect, onPreviewSelect,
   onRemove, onMakeBranch, onMakeMain,
   onRenameOutput, onSavePosition, onResetPosition, onRotate,
   onReplaceFile, onSplitFile,
@@ -83,6 +85,12 @@ export default function FileCard({
     if (selectionMode) {
       onToggleSelect?.();
     } else {
+      onPreviewSelect?.();
+    }
+  };
+
+  const handleThumbnailDoubleClick = () => {
+    if (!selectionMode) {
       setShowPdfEdit(true);
     }
   };
@@ -90,7 +98,9 @@ export default function FileCard({
   return (
     <>
       <div className={`bg-white border rounded-lg overflow-hidden shadow-sm flex flex-col w-[160px] transition-all ${
-        selectionMode && isSelected ? 'border-blue-500 ring-2 ring-blue-300' : 'border-gray-200'
+        selectionMode && isSelected ? 'border-blue-500 ring-2 ring-blue-300'
+        : isPreviewing ? 'border-blue-500 ring-2 ring-blue-200 shadow-md'
+        : 'border-gray-200'
       }`}>
         {/* サムネイル（クリックでプレビューモーダルを開く） */}
         <div
@@ -98,7 +108,8 @@ export default function FileCard({
             selectionMode ? 'cursor-pointer' : 'cursor-zoom-in'
           }`}
           onClick={handleThumbnailClick}
-          title={selectionMode ? undefined : 'クリックしてプレビュー・編集'}
+          onDoubleClick={handleThumbnailDoubleClick}
+          title={selectionMode ? undefined : 'クリックでプレビュー / ダブルクリックで編集'}
         >
           {thumbnail ? (
             <img
@@ -121,7 +132,7 @@ export default function FileCard({
           {!selectionMode && (
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-all pointer-events-none">
               <span className="text-white text-xs font-medium bg-black/60 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                🔍 プレビュー・編集
+                🔍 プレビュー
               </span>
             </div>
           )}

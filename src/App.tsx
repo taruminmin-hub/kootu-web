@@ -16,8 +16,10 @@ import SettingsModal from './components/SettingsModal';
 import ProcessingOverlay from './components/ProcessingOverlay';
 import ConfirmOutputModal from './components/ConfirmOutputModal';
 import ResultModal from './components/ResultModal';
+import PdfEditModal from './components/PdfEditModal';
 import AiSplitModal from './components/AiSplitModal';
 import AiNameModal from './components/AiNameModal';
+import PdfPreviewPanel from './components/PdfPreviewPanel';
 import type { SymbolType } from './types';
 
 const SYMBOLS: { value: SymbolType; label: string }[] = [
@@ -58,6 +60,8 @@ export default function App() {
   const [aiSplitFile, setAiSplitFile] = useState<File | null>(null);
   const [showAiName, setShowAiName] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<{ fileId: string; file: File; label: string; customOutputName?: string } | null>(null);
+  const [showPdfEditFromPreview, setShowPdfEditFromPreview] = useState(false);
 
   // カスタム符号が空の場合に処理を無効化
   const isCustomSymbolEmpty = settings.symbol === 'custom' && !settings.customSymbol.trim();
@@ -147,6 +151,12 @@ export default function App() {
       }
     };
     input.click();
+  }, []);
+
+  const handlePreviewSelect = useCallback((fileId: string, file: File, label: string, customOutputName?: string) => {
+    setPreviewFile(prev =>
+      prev?.fileId === fileId ? null : { fileId, file, label, customOutputName },
+    );
   }, []);
 
   const toggleSelect = useCallback((fileId: string) => {
@@ -353,63 +363,108 @@ export default function App() {
           </div>
         </aside>
 
-        {/* ── メインエリア ── */}
-        <main className="flex-1 p-4 overflow-y-auto">
-          {groups.length === 0 ? (
-            <DropZone onDrop={handleAddFiles} />
-          ) : (
-            <>
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext
-                  items={groups.map((g) => g.id)}
-                  strategy={verticalListSortingStrategy}
+        {/* ── メインエリア（ファイル一覧 + プレビュー分割） ── */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* 左: ファイル一覧 */}
+          <main className={`p-4 overflow-y-auto transition-all ${
+            previewFile ? 'w-1/2 lg:w-[45%]' : 'flex-1'
+          }`}>
+            {groups.length === 0 ? (
+              <DropZone onDrop={handleAddFiles} />
+            ) : (
+              <>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
                 >
-                  <div className="space-y-2">
-                    {groups.map((group, i) => (
-                      <FileGroupRow
-                        key={group.id}
-                        group={group}
-                        index={i}
-                        settings={settings}
-                        isFirst={i === 0}
-                        isLast={i === groups.length - 1}
-                        selectionMode={selectionMode}
-                        selectedIds={selectedIds}
-                        onToggleSelect={toggleSelect}
-                        draggingGroupId={draggingGroupId}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-                <DragOverlay>
-                  {draggingGroupId ? (() => {
-                    const g = groups.find(g => g.id === draggingGroupId);
-                    if (!g) return null;
-                    return (
-                      <div className="bg-white border-2 border-blue-400 rounded-xl p-3 shadow-xl opacity-80 w-[200px]">
-                        <div className="text-sm font-medium text-gray-700 truncate">{g.mainFile.file.name}</div>
-                        {g.branchFiles.length > 0 && (
-                          <div className="text-xs text-gray-400 mt-1">+ {g.branchFiles.length} 枝番</div>
-                        )}
-                      </div>
-                    );
-                  })() : null}
-                </DragOverlay>
-              </DndContext>
-              <div className="mt-3">
-                <DropZone onDrop={handleAddFiles} compact />
-              </div>
-            </>
+                  <SortableContext
+                    items={groups.map((g) => g.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-2">
+                      {groups.map((group, i) => (
+                        <FileGroupRow
+                          key={group.id}
+                          group={group}
+                          index={i}
+                          settings={settings}
+                          isFirst={i === 0}
+                          isLast={i === groups.length - 1}
+                          selectionMode={selectionMode}
+                          selectedIds={selectedIds}
+                          onToggleSelect={toggleSelect}
+                          draggingGroupId={draggingGroupId}
+                          previewingFileId={previewFile?.fileId}
+                          onPreviewSelect={handlePreviewSelect}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                  <DragOverlay>
+                    {draggingGroupId ? (() => {
+                      const g = groups.find(g => g.id === draggingGroupId);
+                      if (!g) return null;
+                      return (
+                        <div className="bg-white border-2 border-blue-400 rounded-xl p-3 shadow-xl opacity-80 w-[200px]">
+                          <div className="text-sm font-medium text-gray-700 truncate">{g.mainFile.file.name}</div>
+                          {g.branchFiles.length > 0 && (
+                            <div className="text-xs text-gray-400 mt-1">+ {g.branchFiles.length} 枝番</div>
+                          )}
+                        </div>
+                      );
+                    })() : null}
+                  </DragOverlay>
+                </DndContext>
+                <div className="mt-3">
+                  <DropZone onDrop={handleAddFiles} compact />
+                </div>
+              </>
+            )}
+          </main>
+
+          {/* 右: PDFプレビューパネル */}
+          {previewFile && (
+            <aside className="w-1/2 lg:w-[55%] border-l border-gray-200 bg-white hidden md:block">
+              <PdfPreviewPanel
+                key={previewFile.fileId}
+                file={previewFile.file}
+                label={previewFile.label}
+                customOutputName={previewFile.customOutputName}
+                onClose={() => setPreviewFile(null)}
+                onOpenEdit={() => setShowPdfEditFromPreview(true)}
+              />
+            </aside>
           )}
-        </main>
+        </div>
       </div>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showPdfEditFromPreview && previewFile && (
+        <PdfEditModal
+          file={previewFile.file}
+          onReplaceFile={(newFile) => {
+            // ファイルを置き換えてプレビューも更新
+            const { replaceFile } = useStore.getState();
+            for (const g of groups) {
+              if (g.mainFile.id === previewFile.fileId) {
+                replaceFile(g.id, g.mainFile.id, newFile);
+                setPreviewFile({ ...previewFile, file: newFile });
+                break;
+              }
+              const branch = g.branchFiles.find(f => f.id === previewFile.fileId);
+              if (branch) {
+                replaceFile(g.id, branch.id, newFile);
+                setPreviewFile({ ...previewFile, file: newFile });
+                break;
+              }
+            }
+          }}
+          onSplitFile={() => {}}
+          onClose={() => setShowPdfEditFromPreview(false)}
+        />
+      )}
       {processing && <ProcessingOverlay current={progress.current} total={progress.total} />}
       {converting && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

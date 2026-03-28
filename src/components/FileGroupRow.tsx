@@ -18,6 +18,8 @@ interface Props {
   selectedIds: Set<string>;
   onToggleSelect: (fileId: string) => void;
   draggingGroupId?: string | null;
+  previewingFileId?: string | null;
+  onPreviewSelect?: (fileId: string, file: File, label: string, customOutputName?: string) => void;
 }
 
 /** 枝番ファイルをドラッグで並び替えるためのラッパー */
@@ -49,7 +51,7 @@ function SortableBranchItem({ id, children }: { id: string; children: React.Reac
 export default function FileGroupRow({
   group, index, settings, isFirst, isLast,
   selectionMode, selectedIds, onToggleSelect,
-  draggingGroupId,
+  draggingGroupId, previewingFileId, onPreviewSelect,
 }: Props) {
   const {
     removeGroup, removeBranch, makeBranch, makeMain,
@@ -176,7 +178,9 @@ export default function FileGroupRow({
           settings={settings}
           selectionMode={selectionMode}
           isSelected={selectedIds.has(group.mainFile.id)}
+          isPreviewing={previewingFileId === group.mainFile.id}
           onToggleSelect={() => onToggleSelect(group.mainFile.id)}
+          onPreviewSelect={() => onPreviewSelect?.(group.mainFile.id, group.mainFile.file, mainLabel, group.mainFile.customOutputName)}
           onRemove={() => removeGroup(group.id)}
           onMakeBranch={!isFirst ? () => makeBranch(group.id) : undefined}
           onRenameOutput={(name) => setCustomOutputName(group.id, group.mainFile.id, name)}
@@ -210,7 +214,9 @@ export default function FileGroupRow({
                     settings={settings}
                     selectionMode={selectionMode}
                     isSelected={selectedIds.has(entry.id)}
+                    isPreviewing={previewingFileId === entry.id}
                     onToggleSelect={() => onToggleSelect(entry.id)}
+                    onPreviewSelect={() => onPreviewSelect?.(entry.id, entry.file, branchLabels[j], entry.customOutputName)}
                     onRemove={() => removeBranch(group.id, entry.id)}
                     onMakeMain={() => makeMain(group.id, entry.id)}
                     onRenameOutput={(name) => setCustomOutputName(group.id, entry.id, name)}
