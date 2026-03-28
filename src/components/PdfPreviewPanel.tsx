@@ -13,7 +13,7 @@ import {
   applyAnnotations, convertAnnotationToPdf,
 } from '../utils/pdfEditUtils';
 import { useStore } from '../store/useStore';
-import { printPageImage } from '../utils/printUtils';
+import { printPdfPage } from '../utils/printUtils';
 import type { StampPosition, Settings, StampColor } from '../types';
 import type { Annotation, AnnotationTool, AnnotationStyle } from '../types/annotation';
 import EditorToolbar from './preview/EditorToolbar';
@@ -676,13 +676,10 @@ export default function PdfPreviewPanel({
 
         {/* 印刷ボタン */}
         <button
-          onClick={() => {
-            const dataUrl = pages[currentPage];
-            if (dataUrl) printPageImage(dataUrl, `${displayName} - ページ ${currentPage + 1}`);
-          }}
-          disabled={!pages[currentPage]}
+          onClick={() => printPdfPage(file, currentPage)}
+          disabled={totalPages === 0}
           className="shrink-0 text-[10px] text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-50 disabled:opacity-40"
-          title="このページを印刷"
+          title="このページを印刷（PDF品質）"
         >
           印刷
         </button>

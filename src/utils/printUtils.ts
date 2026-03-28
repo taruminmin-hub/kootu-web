@@ -1,40 +1,33 @@
+import { PDFDocument } from 'pdf-lib';
 import type { FileGroup, Settings } from '../types';
 import { processAllFiles } from './pdfProcessor';
 
 /**
- * 単一ページの画像データURLを新しいウィンドウで印刷する
+ * PDFファイルの指定ページのみを抽出して新しいウィンドウで印刷する。
+ * 元PDFから該当ページだけをコピーしたPDFを生成するため、高品質な印刷が可能。
  */
-export function printPageImage(dataUrl: string, pageLabel: string): void {
+export async function printPdfPage(file: File, pageIndex: number): Promise<void> {
   const win = window.open('', '_blank');
   if (!win) {
     alert('ポップアップがブロックされました。ブラウザの設定を確認してください。');
     return;
   }
-  win.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>${pageLabel}</title>
-      <style>
-        @media print {
-          @page { margin: 0; }
-          body { margin: 0; }
-          img { width: 100vw; height: auto; max-height: 100vh; object-fit: contain; }
-        }
-        body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #fff; }
-        img { max-width: 100%; max-height: 100vh; }
-      </style>
-    </head>
-    <body>
-      <img src="${dataUrl}" />
-      <script>
-        window.onload = function() { window.print(); };
-        window.onafterprint = function() { window.close(); };
-      </script>
-    </body>
-    </html>
-  `);
-  win.document.close();
+
+  try {
+    const bytes = await file.arrayBuffer();
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const doc = await PDFDocument.create();
+    const [page] = await doc.copyPages(src, [pageIndex]);
+    doc.addPage(page);
+    const pdfBytes = await doc.save();
+    const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    win.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch {
+    win.close();
+    alert('PDFの印刷準備に失敗しました。');
+  }
 }
 
 /**

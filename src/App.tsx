@@ -18,7 +18,7 @@ import ResultModal from './components/ResultModal';
 import AiSplitModal from './components/AiSplitModal';
 import AiNameModal from './components/AiNameModal';
 import PdfPreviewPanel from './components/PdfPreviewPanel';
-import type { SymbolType } from './types';
+import type { SymbolType, StampFormat } from './types';
 
 const SYMBOLS: { value: SymbolType; label: string }[] = [
   { value: '甲', label: '甲' },
@@ -85,7 +85,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* ── ヘッダー ── */}
-      <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex items-center gap-4 md:gap-6 shadow-sm">
+      <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-1.5 flex items-center gap-3 md:gap-4 shadow-sm">
         {/* モバイル: ハンバーガーメニュー */}
         <button
           onClick={() => setSidebarOpen(v => !v)}
@@ -142,12 +142,26 @@ export default function App() {
             />
             <span className="text-sm text-gray-600">番号なし</span>
           </label>
+
+          {/* 番号形式 */}
+          <div className={`flex items-center gap-2 transition-opacity ${settings.numberless ? 'opacity-40 pointer-events-none' : ''}`}>
+            <label className="text-sm text-gray-600 shrink-0">形式:</label>
+            <select
+              value={settings.stampFormat}
+              onChange={(e) => updateSettings({ stampFormat: e.target.value as StampFormat })}
+              className="border border-gray-300 rounded px-2 py-1 text-sm bg-white"
+            >
+              <option value="full-cert">甲第1号証</option>
+              <option value="cert">甲1号証</option>
+              <option value="simple">甲1</option>
+            </select>
+          </div>
         </div>
 
         <div className="ml-auto shrink-0">
           <button
             onClick={() => setShowSettings(true)}
-            className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 flex items-center gap-1.5"
+            className="text-sm border border-gray-300 rounded-lg px-3 py-1 hover:bg-gray-50 flex items-center gap-1.5"
           >
             ⚙ 設定
           </button>
