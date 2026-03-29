@@ -36,6 +36,8 @@ export default function AnnotationOverlay({
   const [start, setStart] = useState({ x: 0, y: 0 });
   const [current, setCurrent] = useState({ x: 0, y: 0 });
   const [freehandPoints, setFreehandPoints] = useState<{ x: number; y: number }[]>([]);
+  const freehandRef = useRef<{ x: number; y: number }[]>([]);
+  const lastFreehandTime = useRef(0);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [textInput, setTextInput] = useState<{ x: number; y: number } | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -57,6 +59,7 @@ export default function AnnotationOverlay({
     const pos = getPos(e);
 
     if (activeTool === 'text') {
+      textSubmittedRef.current = false;
       setTextInput(pos);
       setTimeout(() => textRef.current?.focus(), 50);
       e.preventDefault();
@@ -67,6 +70,7 @@ export default function AnnotationOverlay({
     setCurrent(pos);
     setDrawing(true);
     if (activeTool === 'freehand') {
+      freehandRef.current = [pos];
       setFreehandPoints([pos]);
     }
     e.preventDefault();
@@ -77,7 +81,19 @@ export default function AnnotationOverlay({
     const pos = getPos(e);
     setCurrent(pos);
     if (activeTool === 'freehand') {
-      setFreehandPoints(prev => [...prev, pos]);
+      // 最小距離フィルタ: 2px未満の移動は無視
+      const last = freehandRef.current[freehandRef.current.length - 1];
+      if (last) {
+        const dx = pos.x - last.x, dy = pos.y - last.y;
+        if (dx * dx + dy * dy < 4) return;
+      }
+      freehandRef.current.push(pos);
+      // 16ms（≒60fps）スロットリングで再レンダーを抑制
+      const now = performance.now();
+      if (now - lastFreehandTime.current > 16) {
+        lastFreehandTime.current = now;
+        setFreehandPoints([...freehandRef.current]);
+      }
     }
   }, [drawing, getPos, activeTool]);
 
@@ -121,28 +137,36 @@ export default function AnnotationOverlay({
         x2: current.x, y2: current.y,
       });
     } else if (activeTool === 'freehand') {
-      if (freehandPoints.length < 3) return;
-      const xs = freehandPoints.map(p => p.x);
-      const ys = freehandPoints.map(p => p.y);
-      const minX = Math.min(...xs);
-      const minY = Math.min(...ys);
+      const pts = freehandRef.current;
+      if (pts.length < 3) { setFreehandPoints([]); freehandRef.current = []; return; }
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of pts) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
       onAddAnnotation({
         ...baseAnn,
         type: 'freehand',
         x: minX, y: minY,
-        width: Math.max(...xs) - minX,
-        height: Math.max(...ys) - minY,
-        points: freehandPoints,
+        width: maxX - minX,
+        height: maxY - minY,
+        points: pts,
       });
       setFreehandPoints([]);
+      freehandRef.current = [];
     }
   }, [drawing, start, current, activeTool, strokeColor, fillColor, lineWidth, opacity, freehandPoints, onAddAnnotation]);
 
+  const textSubmittedRef = useRef(false);
   const handleTextSubmit = useCallback((text: string) => {
+    if (textSubmittedRef.current) return; // onBlur + Enter の二重送信を防止
     if (!textInput || !text.trim()) {
       setTextInput(null);
       return;
     }
+    textSubmittedRef.current = true;
     onAddAnnotation({
       id: crypto.randomUUID(),
       type: 'text',
@@ -182,7 +206,7 @@ export default function AnnotationOverlay({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={() => { if (drawing) { setDrawing(false); setFreehandPoints([]); } }}
+      onMouseLeave={() => { if (drawing) { setDrawing(false); setFreehandPoints([]); freehandRef.current = []; } }}
     >
       {/* 既存の注釈を描画 */}
       {annotations.map(ann => (
@@ -386,12 +410,17 @@ function AnnotationShape({ ann, enabled, onRemove }: { ann: Annotation; enabled:
   }
 
   if (ann.type === 'freehand' && ann.points) {
-    const xs = ann.points.map(p => p.x);
-    const ys = ann.points.map(p => p.y);
-    const minX = Math.min(...xs) - 5;
-    const minY = Math.min(...ys) - 5;
-    const maxX = Math.max(...xs) + 5;
-    const maxY = Math.max(...ys) + 5;
+    let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+    for (const p of ann.points) {
+      if (p.x < mnX) mnX = p.x;
+      if (p.y < mnY) mnY = p.y;
+      if (p.x > mxX) mxX = p.x;
+      if (p.y > mxY) mxY = p.y;
+    }
+    const minX = mnX - 5;
+    const minY = mnY - 5;
+    const maxX = mxX + 5;
+    const maxY = mxY + 5;
 
     return (
       <div className="absolute group pointer-events-none" style={{ left: minX, top: minY, width: maxX - minX, height: maxY - minY }}>

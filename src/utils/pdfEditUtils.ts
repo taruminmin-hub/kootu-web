@@ -1,4 +1,5 @@
 import { PDFDocument, degrees, rgb } from 'pdf-lib';
+import type { Annotation } from '../types/annotation';
 
 /**
  * PDFの指定ページを時計回りに90°回転させた新しいFileを返す。
@@ -194,8 +195,6 @@ export async function applyRedactions(
 }
 
 /* ── PDF注釈の定義（PDF座標系） ── */
-
-import type { Annotation } from '../types/annotation';
 
 export interface PdfAnnotation {
   pageIndex: number;

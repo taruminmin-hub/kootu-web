@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   DndContext, closestCenter, DragOverlay,
   PointerSensor, useSensor, useSensors,
@@ -18,7 +18,7 @@ import ResultModal from './components/ResultModal';
 import AiSplitModal from './components/AiSplitModal';
 import AiNameModal from './components/AiNameModal';
 import PdfPreviewPanel from './components/PdfPreviewPanel';
-import type { SymbolType, StampFormat } from './types';
+import type { SymbolType, StampFormat, StampPosition } from './types';
 
 const SYMBOLS: { value: SymbolType; label: string }[] = [
   { value: '甲', label: '甲' },
@@ -81,6 +81,18 @@ export default function App() {
       reorderGroups(String(active.id), overId);
     }
   };
+
+  const handleSavePosition = useCallback((pos: StampPosition) => {
+    const { setCustomStampPosition } = useStore.getState();
+    setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, pos);
+    fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
+  }, [fm]);
+
+  const handleResetPosition = useCallback(() => {
+    const { setCustomStampPosition } = useStore.getState();
+    setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, undefined);
+    fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
+  }, [fm]);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -439,16 +451,8 @@ export default function App() {
                 onClose={() => fm.setPreviewFile(null)}
                 onReplaceFile={fm.handlePreviewReplaceFile}
                 onSplitFile={fm.handlePreviewSplitFile}
-                onSavePosition={(pos) => {
-                  const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, pos);
-                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
-                }}
-                onResetPosition={() => {
-                  const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, undefined);
-                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
-                }}
+                onSavePosition={handleSavePosition}
+                onResetPosition={handleResetPosition}
               />
             </aside>
           )}
@@ -466,16 +470,8 @@ export default function App() {
                 onClose={() => fm.setPreviewFile(null)}
                 onReplaceFile={fm.handlePreviewReplaceFile}
                 onSplitFile={fm.handlePreviewSplitFile}
-                onSavePosition={(pos) => {
-                  const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, pos);
-                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: pos } : null);
-                }}
-                onResetPosition={() => {
-                  const { setCustomStampPosition } = useStore.getState();
-                  setCustomStampPosition(fm.previewFile!.groupId, fm.previewFile!.fileId, undefined);
-                  fm.setPreviewFile(prev => prev ? { ...prev, customStampPosition: undefined } : null);
-                }}
+                onSavePosition={handleSavePosition}
+                onResetPosition={handleResetPosition}
               />
             </div>
           )}

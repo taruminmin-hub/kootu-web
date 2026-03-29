@@ -6,16 +6,15 @@ import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { usePdfAllPages } from '../hooks/usePdfAllPages';
+import { useStampEditor } from '../hooks/useStampEditor';
 import { pdfjsLib } from '../utils/pdfWorkerSetup';
-import { createStampImage } from '../utils/stampUtils';
 import {
   reorderPages, rotateMultiplePages, deleteMultiplePages, splitPdfAfterPage,
   applyAnnotations, convertAnnotationToPdf,
 } from '../utils/pdfEditUtils';
-import { useStore } from '../store/useStore';
 import { printPdfPage } from '../utils/printUtils';
 import type { PrintStampOptions } from '../utils/printUtils';
-import type { StampPosition, Settings, StampColor } from '../types';
+import type { StampPosition, Settings } from '../types';
 import type { Annotation, AnnotationTool, AnnotationStyle } from '../types/annotation';
 import EditorToolbar from './preview/EditorToolbar';
 import AnnotationOverlay from './preview/AnnotationOverlay';
@@ -76,16 +75,6 @@ export default function PdfPreviewPanel({
   const displayName = customOutputName?.trim() || file.name.replace(/\.[^.]+$/, '');
   const totalPages = pages.length;
 
-  // ── スタンプ編集 ──
-  const [pos, setPos] = useState<StampPosition>(
-    customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop },
-  );
-  const [stampEditing, setStampEditing] = useState(false);
-  const [posChanged, setPosChanged] = useState(false);
-  const [stampColor, setStampColor] = useState<StampColor>(settings.color);
-  const [stampFontSize, setStampFontSize] = useState(settings.fontSize);
-  const [stampStyleChanged, setStampStyleChanged] = useState(false);
-
   // ── ページ選択（複数対応） ──
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
   const lastClickedRef = useRef<number | null>(null);
@@ -117,33 +106,30 @@ export default function PdfPreviewPanel({
     setCurrentPage(prev => Math.min(prev, pages.length - 1));
   }, [pages.length]);
 
-  // PDF 1ページ目のサイズ（pt）とCanvas描画サイズ
-  const [pdfSize, setPdfSize] = useState({ w: 595, h: 842 });
+  // 各ページのPDFサイズ（pt）
+  const [pdfPageSizes, setPdfPageSizes] = useState<{ w: number; h: number }[]>([]);
+  const pdfSize = pdfPageSizes[0] ?? { w: 595, h: 842 };
   const firstPageRef = useRef<HTMLDivElement>(null);
   const [firstPageRect, setFirstPageRect] = useState({ w: 0, h: 0 });
 
-  // スタンプ画像
-  const [stampPx, setStampPx] = useState({ w: 60, h: 20 });
-  const [stampImageUrl, setStampImageUrl] = useState<string | null>(null);
-
-  const scale = firstPageRect.w > 0 ? firstPageRect.w / pdfSize.w : 1;
-
-  // PDF 1ページ目のサイズを取得
+  // 全ページのPDFサイズを取得
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const buf = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-        const page = await pdf.getPage(1);
-        const vp = page.getViewport({ scale: 1 });
-        if (!cancelled) {
+        const sizes: { w: number; h: number }[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const vp = page.getViewport({ scale: 1 });
           if (rotation === 90 || rotation === 270) {
-            setPdfSize({ w: vp.height, h: vp.width });
+            sizes.push({ w: vp.height, h: vp.width });
           } else {
-            setPdfSize({ w: vp.width, h: vp.height });
+            sizes.push({ w: vp.width, h: vp.height });
           }
         }
+        if (!cancelled) setPdfPageSizes(sizes);
         pdf.destroy();
       } catch { /* ignore */ }
     })();
@@ -163,97 +149,13 @@ export default function PdfPreviewPanel({
     return () => obs.disconnect();
   }, [pages.length, viewMode]);
 
-  // スタンプ画像生成
-  useEffect(() => {
-    let cancelled = false;
-    let prevUrl: string | null = null;
-    createStampImage(label, stampFontSize, stampColor, settings.whiteBackground, settings.border)
-      .then((bytes) => {
-        if (cancelled) return;
-        const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'image/png' });
-        const url = URL.createObjectURL(blob);
-        prevUrl = url;
-        const img = new Image();
-        img.onload = () => {
-          if (cancelled) { URL.revokeObjectURL(url); return; }
-          setStampPx({ w: img.width / 3, h: img.height / 3 });
-          setStampImageUrl(url);
-        };
-        img.onerror = () => URL.revokeObjectURL(url);
-        img.src = url;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (prevUrl) URL.revokeObjectURL(prevUrl);
-    };
-  }, [label, stampFontSize, stampColor, settings.whiteBackground, settings.border]);
-
-  // ── スタンプ位置ドラッグ ──
-  const stampDragging = useRef(false);
-
-  const updatePosFromEvent = useCallback((clientX: number, clientY: number) => {
-    if (!firstPageRef.current) return;
-    const rect = firstPageRef.current.getBoundingClientRect();
-    const px = clientX - rect.left;
-    const py = clientY - rect.top;
-    const stampW = stampPx.w * scale;
-    const stampH = stampPx.h * scale;
-    const rightPx = rect.width - px - stampW / 2;
-    const topPx = py - stampH / 2;
-    setPos({
-      marginRight: Math.max(0, Math.round(rightPx / scale)),
-      marginTop: Math.max(0, Math.round(topPx / scale)),
-    });
-    setPosChanged(true);
-  }, [scale, stampPx]);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (!stampEditing) return;
-    stampDragging.current = true;
-    updatePosFromEvent(e.clientX, e.clientY);
-  }, [stampEditing, updatePosFromEvent]);
-
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!stampDragging.current) return;
-    updatePosFromEvent(e.clientX, e.clientY);
-  }, [updatePosFromEvent]);
-
-  const handleMouseUp = useCallback(() => { stampDragging.current = false; }, []);
-
-  useEffect(() => {
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [handleMouseMove, handleMouseUp]);
-
-  const stampLeft = firstPageRect.w - (pos.marginRight + stampPx.w) * scale;
-  const stampTop = pos.marginTop * scale;
-
-  const handleSaveStamp = () => {
-    onSavePosition(pos);
-    if (stampStyleChanged) {
-      const { updateSettings } = useStore.getState();
-      updateSettings({ color: stampColor, fontSize: stampFontSize });
-    }
-    setPosChanged(false);
-    setStampStyleChanged(false);
-    setStampEditing(false);
-  };
-  const handleResetStamp = () => {
-    const defaultPos = { marginRight: settings.marginRight, marginTop: settings.marginTop };
-    setPos(defaultPos);
-    setStampColor(settings.color);
-    setStampFontSize(settings.fontSize);
-    onResetPosition();
-    setPosChanged(false);
-    setStampStyleChanged(false);
-    setStampEditing(false);
-  };
-  const anyStampChanged = posChanged || stampStyleChanged;
+  // ── スタンプ編集（カスタムフック） ──
+  const stamp = useStampEditor({
+    label, customStampPosition, settings,
+    firstPageRef, firstPageRect, pdfSize,
+    onSavePosition, onResetPosition,
+  });
+  const { stampEditing } = stamp;
 
   // ── 注釈ハンドラー ──
   const totalAnnotations = Array.from(annotationsByPage.values()).reduce((s, a) => s + a.length, 0);
@@ -283,11 +185,19 @@ export default function PdfPreviewPanel({
     try {
       const pdfAnns = [];
       for (const [pageIdx, anns] of annotationsByPage.entries()) {
+        // ページ固有のPDFサイズを使用（なければ1ページ目にフォールバック）
+        const pagePdfSize = pdfPageSizes[pageIdx] ?? pdfSize;
+        // 表示サイズ: 全ページ同じ幅でレンダリングされるため、
+        // アスペクト比からページ固有の表示高さを算出
+        const displayW = firstPageRect.w;
+        const displayH = firstPageRect.w > 0
+          ? firstPageRect.w * (pagePdfSize.h / pagePdfSize.w)
+          : firstPageRect.h;
         for (const ann of anns) {
           pdfAnns.push(convertAnnotationToPdf(
             ann, pageIdx,
-            firstPageRect.w, firstPageRect.h,
-            pdfSize.w, pdfSize.h,
+            displayW, displayH,
+            pagePdfSize.w, pagePdfSize.h,
           ));
         }
       }
@@ -300,7 +210,7 @@ export default function PdfPreviewPanel({
     } finally {
       setEditProcessing(false);
     }
-  }, [file, annotationsByPage, totalAnnotations, pdfSize, firstPageRect, onReplaceFile]);
+  }, [file, annotationsByPage, totalAnnotations, pdfPageSizes, pdfSize, firstPageRect, onReplaceFile]);
 
   const handleClearAnnotations = useCallback(() => {
     setAnnotationsByPage(new Map());
@@ -509,17 +419,17 @@ export default function PdfPreviewPanel({
   // ── スタンプオーバーレイ（1ページ目用） ──
   const renderStampOverlay = (pageIndex: number) => {
     if (pageIndex !== 0) return null;
-    if (!stampImageUrl || firstPageRect.w <= 0) return null;
+    if (!stamp.stampImageUrl || firstPageRect.w <= 0) return null;
     return (
       <img
-        src={stampImageUrl}
+        src={stamp.stampImageUrl}
         alt={label}
         className={`absolute pointer-events-none ${stampEditing ? 'ring-2 ring-orange-400 ring-offset-1 rounded-sm' : ''}`}
         style={{
-          left: Math.max(0, stampLeft),
-          top: Math.max(0, stampTop),
-          width: stampPx.w * scale,
-          height: stampPx.h * scale,
+          left: Math.max(0, stamp.stampLeft),
+          top: Math.max(0, stamp.stampTop),
+          width: stamp.stampPx.w * stamp.scale,
+          height: stamp.stampPx.h * stamp.scale,
         }}
       />
     );
@@ -531,6 +441,12 @@ export default function PdfPreviewPanel({
     const isFirstPage = i === 0;
     const showOverlay = viewMode === 'single' && !isGrid && activeTool !== 'select' && !stampEditing;
     const pageAnns = annotationsByPage.get(i) ?? [];
+    // ページ固有の表示高さを算出（異なるサイズのページ対応）
+    const pagePdfSize = pdfPageSizes[i] ?? pdfSize;
+    const pageContainerW = firstPageRect.w;
+    const pageContainerH = firstPageRect.w > 0
+      ? firstPageRect.w * (pagePdfSize.h / pagePdfSize.w)
+      : firstPageRect.h;
 
     return (
       <div
@@ -549,7 +465,7 @@ export default function PdfPreviewPanel({
           <div
             ref={firstPageRef}
             className={`relative ${stampEditing ? 'cursor-crosshair' : ''}`}
-            onMouseDown={handleMouseDown}
+            onMouseDown={stamp.handleStampMouseDown}
           >
             <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
             {renderStampOverlay(i)}
@@ -594,8 +510,8 @@ export default function PdfPreviewPanel({
             <img src={dataUrl} alt={`ページ ${i + 1}`} className="w-full bg-white" draggable={false} />
             {showOverlay && (
               <AnnotationOverlay
-                containerWidth={firstPageRect.w}
-                containerHeight={firstPageRect.h}
+                containerWidth={pageContainerW}
+                containerHeight={pageContainerH}
                 annotations={pageAnns}
                 activeTool={activeTool}
                 strokeColor={annStyle.strokeColor}
@@ -611,8 +527,8 @@ export default function PdfPreviewPanel({
             )}
             {viewMode === 'single' && !isGrid && activeTool === 'select' && pageAnns.length > 0 && (
               <AnnotationOverlay
-                containerWidth={firstPageRect.w}
-                containerHeight={firstPageRect.h}
+                containerWidth={pageContainerW}
+                containerHeight={pageContainerH}
                 annotations={pageAnns}
                 activeTool="select"
                 strokeColor={annStyle.strokeColor}
@@ -680,9 +596,9 @@ export default function PdfPreviewPanel({
           onClick={() => {
             const stampOpts: PrintStampOptions = {
               stampText: label,
-              position: pos,
-              fontSize: stampFontSize,
-              color: stampColor,
+              position: stamp.pos,
+              fontSize: stamp.stampFontSize,
+              color: stamp.stampColor,
               whiteBackground: settings.whiteBackground,
               border: settings.border,
             };
@@ -722,25 +638,18 @@ export default function PdfPreviewPanel({
         onClearAnnotations={handleClearAnnotations}
 
         stampEditing={stampEditing}
-        onStartStampEdit={() => { setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); setActiveTool('select'); if (viewMode === 'single') setCurrentPage(0); }}
-        onSaveStamp={handleSaveStamp}
-        onResetStamp={handleResetStamp}
-        onCancelStamp={() => {
-          setStampEditing(false);
-          setPos(customStampPosition ?? { marginRight: settings.marginRight, marginTop: settings.marginTop });
-          setStampColor(settings.color);
-          setStampFontSize(settings.fontSize);
-          setPosChanged(false);
-          setStampStyleChanged(false);
-        }}
-        anyStampChanged={anyStampChanged}
+        onStartStampEdit={() => { stamp.setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); setActiveTool('select'); if (viewMode === 'single') setCurrentPage(0); }}
+        onSaveStamp={stamp.handleSaveStamp}
+        onResetStamp={stamp.handleResetStamp}
+        onCancelStamp={stamp.handleCancelStamp}
+        anyStampChanged={stamp.anyStampChanged}
         customStampPosition={customStampPosition}
-        pos={pos}
-        stampColor={stampColor}
-        setStampColor={setStampColor}
-        stampFontSize={stampFontSize}
-        setStampFontSize={setStampFontSize}
-        setStampStyleChanged={setStampStyleChanged}
+        pos={stamp.pos}
+        stampColor={stamp.stampColor}
+        setStampColor={stamp.setStampColor}
+        stampFontSize={stamp.stampFontSize}
+        setStampFontSize={stamp.setStampFontSize}
+        setStampStyleChanged={stamp.setStampStyleChanged}
 
         viewMode={viewMode}
         totalPages={totalPages}

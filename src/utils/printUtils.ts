@@ -40,8 +40,8 @@ export async function printPdfPage(
     const [page] = await doc.copyPages(src, [pageIndex]);
     doc.addPage(page);
 
-    // 1ページ目（pageIndex === 0）の場合、スタンプを描画
-    if (pageIndex === 0 && stamp) {
+    // スタンプを描画（印刷対象ページに付与）
+    if (stamp) {
       const imgBytes = await createStampImage(
         stamp.stampText, stamp.fontSize, stamp.color,
         stamp.whiteBackground, stamp.border,
@@ -79,34 +79,38 @@ export async function printAllWithStamps(
   settings: Settings,
   onProgress: (current: number, total: number, currentFileName?: string) => void,
 ): Promise<void> {
-  const result = await processAllFiles(groups, settings, onProgress);
-
-  // 全PDFをBlobURLに変換し、iframe経由で印刷
+  // ユーザーアクションの同期コンテキスト内でwindow.openを呼ぶ（ポップアップブロック対策）
   const win = window.open('', '_blank');
   if (!win) {
     alert('ポップアップがブロックされました。ブラウザの設定を確認してください。');
     return;
   }
 
-  // PDFを結合して1つのPDFにして印刷
-  const { PDFDocument } = await import('pdf-lib');
-  const merged = await PDFDocument.create();
+  try {
+    const result = await processAllFiles(groups, settings, onProgress);
 
-  for (const file of result.files) {
-    try {
-      const src = await PDFDocument.load(file.data);
-      const pages = await merged.copyPages(src, src.getPageIndices());
-      for (const page of pages) merged.addPage(page);
-    } catch {
-      // 読み込めないPDFはスキップ
+    // PDFを結合して1つのPDFにして印刷
+    const { PDFDocument } = await import('pdf-lib');
+    const merged = await PDFDocument.create();
+
+    for (const file of result.files) {
+      try {
+        const src = await PDFDocument.load(file.data);
+        const pages = await merged.copyPages(src, src.getPageIndices());
+        for (const page of pages) merged.addPage(page);
+      } catch {
+        // 読み込めないPDFはスキップ
+      }
     }
+
+    const mergedBytes = await merged.save();
+    const blob = new Blob([mergedBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+
+    win.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch {
+    win.close();
+    alert('PDFの印刷準備に失敗しました。');
   }
-
-  const mergedBytes = await merged.save();
-  const blob = new Blob([mergedBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
-  const url = URL.createObjectURL(blob);
-
-  win.location.href = url;
-  // 印刷後にクリーンアップ
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
