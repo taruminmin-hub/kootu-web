@@ -44,6 +44,12 @@ interface Props {
   onApplyAnnotations: () => void;
   onClearAnnotations: () => void;
 
+  /* ── ズーム ── */
+  zoomPercent: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomFit: () => void;
+
   /* ── スタンプ編集 ── */
   stampEditing: boolean;
   onStartStampEdit: () => void;
@@ -83,6 +89,7 @@ interface Props {
 export default function EditorToolbar({
   activeTool, setActiveTool, style, onStyleChange,
   annotationCount, onApplyAnnotations, onClearAnnotations,
+  zoomPercent, onZoomIn, onZoomOut, onZoomFit,
   stampEditing, onStartStampEdit, onSaveStamp, onResetStamp, onCancelStamp,
   anyStampChanged, customStampPosition, pos,
   stampColor, setStampColor, stampFontSize, setStampFontSize, setStampStyleChanged,
@@ -122,6 +129,31 @@ export default function EditorToolbar({
             ))}
           </div>
         ))}
+
+        {/* ズームコントロール */}
+        <div className="w-px h-5 bg-gray-300 mx-1" />
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={onZoomOut}
+            disabled={stampEditing}
+            className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+            title="縮小"
+          >−</button>
+          <button
+            onClick={onZoomFit}
+            disabled={stampEditing}
+            className="h-6 px-1 rounded text-[10px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 min-w-[36px] text-center"
+            title="フィット表示"
+          >
+            {zoomPercent}%
+          </button>
+          <button
+            onClick={onZoomIn}
+            disabled={stampEditing}
+            className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+            title="拡大"
+          >+</button>
+        </div>
 
         {/* スタイル：線 ON/OFF + 色 */}
         {isAnnotationMode && !stampEditing && activeTool !== 'redaction' && (

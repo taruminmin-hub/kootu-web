@@ -70,6 +70,11 @@ export default function PdfPreviewPanel({
   const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
   const [currentPage, setCurrentPage] = useState(0);
 
+  // ── ズーム ──
+  const ZOOM_STEPS = [25, 50, 75, 100, 125, 150, 200];
+  const [zoomPercent, setZoomPercent] = useState(100); // 100 = fit to view (default)
+  const [fitZoom, setFitZoom] = useState(100); // calculated fit percentage
+
   const thumbWidth = viewMode === 'grid' ? 250 : 700;
   const { pages, loading } = usePdfAllPages(file, thumbWidth);
   const displayName = customOutputName?.trim() || file.name.replace(/\.[^.]+$/, '');
@@ -156,6 +161,58 @@ export default function PdfPreviewPanel({
     onSavePosition, onResetPosition,
   });
   const { stampEditing } = stamp;
+
+  // ── ズーム: フィット計算 ──
+  // scrollContainerのサイズとPDFのアスペクト比からフィット倍率を計算
+  // zoomPercent=100 で scrollContainer 幅いっぱい → それを基準にフィット倍率を算出
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || pdfSize.w <= 0 || pdfSize.h <= 0) return;
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const cW = entry.contentRect.width - 24; // p-3 padding
+        const cH = entry.contentRect.height - 40; // padding + page nav
+        if (cW <= 0 || cH <= 0) return;
+        // zoom=100% → image fills container width (cW)
+        // at 100%, image height = cW * (pdfH / pdfW)
+        const imgHAt100 = cW * (pdfSize.h / pdfSize.w);
+        if (imgHAt100 <= cH) {
+          // already fits at 100%
+          setFitZoom(100);
+        } else {
+          // need to shrink: fitPct so that imgHAt100 * (fitPct/100) = cH
+          setFitZoom(Math.max(10, Math.round((cH / imgHAt100) * 100)));
+        }
+      }
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [pdfSize]);
+
+  // 初回: フィット表示に自動設定
+  const fitInitialized = useRef(false);
+  useEffect(() => {
+    if (fitZoom > 0 && !fitInitialized.current && viewMode === 'single') {
+      fitInitialized.current = true;
+      setZoomPercent(fitZoom);
+    }
+  }, [fitZoom, viewMode]);
+
+  const handleZoomIn = useCallback(() => {
+    setZoomPercent(prev => {
+      const next = ZOOM_STEPS.find(s => s > prev);
+      return next ?? Math.min(prev + 25, 200);
+    });
+  }, []);
+  const handleZoomOut = useCallback(() => {
+    setZoomPercent(prev => {
+      const next = [...ZOOM_STEPS].reverse().find(s => s < prev);
+      return next ?? Math.max(prev - 25, 25);
+    });
+  }, []);
+  const handleZoomFit = useCallback(() => {
+    setZoomPercent(fitZoom);
+  }, [fitZoom]);
 
   // ── 注釈ハンドラー ──
   const totalAnnotations = Array.from(annotationsByPage.values()).reduce((s, a) => s + a.length, 0);
@@ -637,6 +694,11 @@ export default function PdfPreviewPanel({
         onApplyAnnotations={handleApplyAnnotations}
         onClearAnnotations={handleClearAnnotations}
 
+        zoomPercent={zoomPercent}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onZoomFit={handleZoomFit}
+
         stampEditing={stampEditing}
         onStartStampEdit={() => { stamp.setStampEditing(true); setSelectedPages(new Set()); setEditConfirm(null); setActiveTool('select'); if (viewMode === 'single') setCurrentPage(0); }}
         onSaveStamp={stamp.handleSaveStamp}
@@ -698,8 +760,10 @@ export default function PdfPreviewPanel({
           </div>
         ) : viewMode === 'single' ? (
           /* ── 単一ページ表示 ── */
-          <div className="p-3">
-            {pages[currentPage] && renderPageThumb(currentPage, pages[currentPage], false)}
+          <div className="p-3 flex flex-col items-center">
+            <div style={{ width: `${zoomPercent}%`, maxWidth: zoomPercent > 100 ? 'none' : undefined }}>
+              {pages[currentPage] && renderPageThumb(currentPage, pages[currentPage], false)}
+            </div>
 
             {/* ページ送りコントロール */}
             {totalPages > 1 && (

@@ -133,7 +133,7 @@ export default function App() {
             )}
           </div>
 
-          <div className={`flex items-center gap-2 transition-opacity ${settings.numberless ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600 shrink-0">開始番号:</label>
             <input
               type="number"
@@ -144,19 +144,8 @@ export default function App() {
             />
           </div>
 
-          {/* 番号なしオプション */}
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={settings.numberless}
-              onChange={(e) => updateSettings({ numberless: e.target.checked })}
-              className="accent-blue-600 w-4 h-4"
-            />
-            <span className="text-sm text-gray-600">番号なし</span>
-          </label>
-
           {/* 番号形式 */}
-          <div className={`flex items-center gap-2 transition-opacity ${settings.numberless ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600 shrink-0">形式:</label>
             <select
               value={settings.stampFormat}
@@ -168,12 +157,10 @@ export default function App() {
               <option value="simple">甲1</option>
             </select>
           </div>
-        </div>
 
-        <div className="ml-auto shrink-0">
           <button
             onClick={() => setShowSettings(true)}
-            className="text-sm border border-gray-300 rounded-lg px-3 py-1 hover:bg-gray-50 flex items-center gap-1.5"
+            className="text-sm border border-gray-300 rounded-lg px-3 py-1 hover:bg-gray-50 flex items-center gap-1.5 shrink-0"
           >
             ⚙ 設定
           </button>
@@ -216,7 +203,7 @@ export default function App() {
                 className="border border-gray-300 rounded px-1.5 py-1 text-xs w-full"
               />
             )}
-            <div className={`flex items-center gap-2 transition-opacity ${settings.numberless ? 'opacity-40 pointer-events-none' : ''}`}>
+            <div className="flex items-center gap-2">
               <label className="text-xs text-gray-600 shrink-0">開始番号:</label>
               <input
                 type="number"
@@ -226,15 +213,6 @@ export default function App() {
                 className="border border-gray-300 rounded px-1.5 py-1 text-xs w-14 text-center"
               />
             </div>
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={settings.numberless}
-                onChange={(e) => updateSettings({ numberless: e.target.checked })}
-                className="accent-blue-600 w-3.5 h-3.5"
-              />
-              <span className="text-xs text-gray-600">番号なし</span>
-            </label>
           </div>
 
           {/* ── 主要アクション ── */}
@@ -437,9 +415,9 @@ export default function App() {
             )}
           </main>
 
-          {/* 右: PDFプレビューパネル（デスクトップ: サイドパネル） */}
+          {/* 右: PDFプレビューパネル（デスクトップ: 全高表示） */}
           {fm.previewFile && (
-            <aside className="w-1/2 lg:w-[55%] border-l border-gray-200 bg-white hidden md:block">
+            <aside className="fixed inset-y-0 right-0 w-1/2 lg:w-[55%] border-l border-gray-200 bg-white hidden md:block z-20 shadow-xl">
               <PdfPreviewPanel
                 key={fm.previewFile.fileId}
                 file={fm.previewFile.file}
